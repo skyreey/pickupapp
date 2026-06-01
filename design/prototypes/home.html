@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>ȡ��ͨ - ��ҳ</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<script>tailwind.config={theme:{extend:{colors:{primary:"#6750A4",surface:"#FFFBFE",bg:"#F6F2F7",outline:"#79747E",error:"#B3261E"}}}}</script>
+<style>
+.phone-frame{width:393px;height:852px;background:#1C1B1F;border-radius:44px;padding:12px;margin:20px auto;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.phone-screen{width:100%;height:100%;background:#F6F2F7;border-radius:34px;overflow:hidden;position:relative;display:flex;flex-direction:column}
+.status-bar{background:#F6F2F7;padding:14px 24px 8px;display:flex;justify-content:space-between;font-size:12px;font-weight:600;color:#1C1B1F}
+.chip{display:inline-flex;align-items:center;padding:6px 16px;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;transition:all .2s}
+.chip-active{background:#6750A4;color:#fff}
+.chip-inactive{background:#E7E0EC;color:#49454F}
+.fab{position:absolute;bottom:80px;right:20px;width:56px;height:56px;background:#6750A4;border-radius:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(103,80,164,.4)}
+</style>
+</head>
+<body style="background:#E8DEF8;font-family:system-ui,sans-serif;display:flex;justify-content:center;padding:20px">
+<div class="phone-frame"><div class="phone-screen">
+<div class="status-bar"><span>9:41</span><span><i class="fas fa-signal"></i> <i class="fas fa-wifi"></i> <i class="fas fa-battery-full"></i></span></div>
+<div class="px-5 pt-3 pb-2"><h1 class="text-2xl font-bold text-gray-900">�ҵİ���</h1><p class="text-sm text-outline mt-1">�� 8 ������</p></div>
+<div class="px-5 pb-2 flex gap-2 overflow-x-auto">
+<span class="chip chip-active">��ȡ�� 5</span>
+<span class="chip chip-inactive">��ȡ 1</span>
+<span class="chip chip-inactive">��ȡ�� 2</span>
+<span class="chip chip-inactive">�ѹ���</span>
+</div>
+<div class="flex-1 overflow-y-auto px-5 pb-20 space-y-2">
+<div class="bg-surface rounded-2xl p-4 flex items-center gap-3 border-l-4" style="border-left-color:#6750A4">
+<div class="w-10 h-10 rounded-xl flex items-center justify-center text-lg" style="background:#E8DEF8">??</div>
+<div class="flex-1"><div class="font-semibold text-gray-900">���� �� 5-2-8812</div><div class="text-xs text-outline mt-1">�ϴ� �� ���⻨԰��վ | �����ֹ</div></div>
+<i class="fas fa-chevron-right text-outline"></i></div>
+<div class="bg-surface rounded-2xl p-4 flex items-center gap-3 border-l-4" style="border-left-color:#B3261E">
+<div class="w-10 h-10 rounded-xl flex items-center justify-center text-lg" style="background:#FFDAD6">???</div>
+<div class="flex-1"><div class="font-semibold text-gray-900">˳�� �� SF1234567890</div><div class="text-xs text-outline mt-1">˳�� �� ������վ3�Ź� | ���ս�ֹ</div></div>
+<i class="fas fa-chevron-right text-outline"></i></div>
+<div class="bg-surface rounded-2xl p-4 flex items-center gap-3 border-l-4" style="border-left-color:#FF9500">
+<div class="w-10 h-10 rounded-xl flex items-center justify-center text-lg" style="background:#FFE8CC">??</div>
+<div class="flex-1"><div class="font-semibold text-gray-900">��ͨ �� 3-7-4415</div><div class="text-xs text-outline mt-1">��ͨ �� XX·������վ | 3����ֹ</div></div>
+<i class="fas fa-chevron-right text-outline"></i></div>
+</div>
+<div class="absolute bottom-0 left-0 right-0 bg-surface border-t border-gray-200 flex justify-around py-3 pb-6">
+<div class="flex flex-col items-center text-primary"><i class="fas fa-box text-xl"></i><span class="text-xs mt-1 font-semibold">����</span></div>
+<div class="flex flex-col items-center text-outline"><i class="fas fa-pen text-xl"></i><span class="text-xs mt-1">¼��</span></div>
+<div class="flex flex-col items-center text-outline"><i class="fas fa-cog text-xl"></i><span class="text-xs mt-1">����</span></div>
+</div>
+<div class="fab"><i class="fas fa-qrcode text-white text-xl"></i></div>
+</div></div>
+</body></html>
