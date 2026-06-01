@@ -1,0 +1,21 @@
+apply plugin: 'com.android.library'
+apply plugin: 'expo-module-gradle-plugin'
+
+group = 'expo.modules.gallerylauncher'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.gallerylauncher"
+  compileSdk rootProject.ext.compileSdkVersion
+  defaultConfig {
+    minSdkVersion rootProject.ext.minSdkVersion
+    targetSdkVersion rootProject.ext.targetSdkVersion
+    versionCode 1
+    versionName "1.0.0"
+  }
+  buildFeatures { buildConfig true }
+}
+
+dependencies {
+  implementation project(':expo-modules-core')
+}

@@ -1,0 +1,211 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  桌面挂件布局 — iOS 风格卡片设计
+  灰底 + 白色卡片，与 App 浅色主题保持一致
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#F2F2F7"
+    android:padding="6dp">
+
+    <!-- ========== 头部：标题 + Badge ========== -->
+    <LinearLayout
+        android:id="@+id/widget_header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/widget_card_bg"
+        android:paddingVertical="8dp"
+        android:paddingHorizontal="12dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="取件通"
+            android:textSize="14sp"
+            android:textColor="#000000"
+            android:textStyle="bold"
+            android:maxLines="1" />
+
+        <TextView
+            android:id="@+id/widget_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="7dp"
+            android:paddingVertical="1dp"
+            android:textSize="11sp"
+            android:textColor="#FFFFFF"
+            android:background="@drawable/widget_badge_bg"
+            android:maxLines="1" />
+    </LinearLayout>
+
+    <!-- ========== 包裹列表（有数据时显示） ========== -->
+    <LinearLayout
+        android:id="@+id/widget_package_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <!-- 第 1 个包裹 -->
+        <LinearLayout
+            android:id="@+id/widget_item_1"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="#FFFFFF"
+            android:paddingHorizontal="12dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/widget_code_1"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="15sp"
+                android:textColor="#000000"
+                android:textStyle="bold"
+                android:maxLines="1" />
+
+            <TextView
+                android:id="@+id/widget_station_1"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="11sp"
+                android:textColor="#8E8E93"
+                android:maxLines="1"
+                android:ellipsize="end" />
+        </LinearLayout>
+
+        <View
+            android:id="@+id/widget_divider_1"
+            android:layout_width="match_parent"
+            android:layout_height="0.5dp"
+            android:background="#E5E5EA"
+            android:visibility="gone" />
+
+        <!-- 第 2 个包裹 -->
+        <LinearLayout
+            android:id="@+id/widget_item_2"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="#FFFFFF"
+            android:paddingHorizontal="12dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/widget_code_2"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="15sp"
+                android:textColor="#000000"
+                android:textStyle="bold"
+                android:maxLines="1" />
+
+            <TextView
+                android:id="@+id/widget_station_2"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="11sp"
+                android:textColor="#8E8E93"
+                android:maxLines="1"
+                android:ellipsize="end" />
+        </LinearLayout>
+
+        <View
+            android:id="@+id/widget_divider_2"
+            android:layout_width="match_parent"
+            android:layout_height="0.5dp"
+            android:background="#E5E5EA"
+            android:visibility="gone" />
+
+        <!-- 第 3 个包裹 -->
+        <LinearLayout
+            android:id="@+id/widget_item_3"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="#FFFFFF"
+            android:paddingHorizontal="12dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/widget_code_3"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="15sp"
+                android:textColor="#000000"
+                android:textStyle="bold"
+                android:maxLines="1" />
+
+            <TextView
+                android:id="@+id/widget_station_3"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="11sp"
+                android:textColor="#8E8E93"
+                android:maxLines="1"
+                android:ellipsize="end" />
+        </LinearLayout>
+
+        <View
+            android:id="@+id/widget_divider_3"
+            android:layout_width="match_parent"
+            android:layout_height="0.5dp"
+            android:background="#E5E5EA"
+            android:visibility="gone" />
+
+        <!-- 更多指示 -->
+        <TextView
+            android:id="@+id/widget_more_text"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:textSize="11sp"
+            android:textColor="#8E8E93"
+            android:background="#FFFFFF"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <!-- ========== 空状态（无包裹时显示） ========== -->
+    <LinearLayout
+        android:id="@+id/widget_empty_state"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:background="#FFFFFF"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="📦"
+            android:textSize="20sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="暂无待取包裹"
+            android:textSize="12sp"
+            android:textColor="#8E8E93"
+            android:layout_marginTop="2dp" />
+    </LinearLayout>
+</LinearLayout>

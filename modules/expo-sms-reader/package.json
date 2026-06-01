@@ -1,0 +1,7 @@
+{
+  "name": "expo-sms-reader",
+  "version": "1.0.0",
+  "description": "SMS listener for pickup code extraction",
+  "main": "index.ts",
+  "types": "index.ts"
+}

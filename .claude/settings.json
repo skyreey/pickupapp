@@ -1,0 +1,34 @@
+{
+  "enabledPlugins": {
+    "expo@claude-plugins-official": true
+  },
+  "autoCompactEnabled": true,
+  "alwaysThinkingEnabled": false,
+  "permissions": {
+    "allow": [
+      "Bash(REACT_NATIVE_PACKAGER_HOSTNAME=127.0.0.1 npx expo start --localhost)",
+      "Bash(REACT_NATIVE_PACKAGER_HOSTNAME=192.168.50.170 npx expo start)",
+      "Bash(CI=1 REACT_NATIVE_PACKAGER_HOSTNAME=192.168.50.170 npx expo start)",
+      "Bash(JAVA_HOME=\"C:/Program Files/Android/Android Studio/jbr\" ANDROID_HOME=\"C:/android-sdk\" npx expo run:android --no-bundler)",
+      "Bash(JAVA_HOME=\"C:/Program Files/Android/Android Studio/jbr\" ./gradlew assembleDebug)",
+      "Bash(JAVA_HOME=\"C:/Program Files/Android/Android Studio/jbr\" ./gradlew assembleRelease)",
+      "Bash(./gradlew assembleDebug)",
+      "Bash(./gradlew assembleRelease)",
+      "Bash(./gradlew assembleDebug --no-daemon)",
+      "Bash(./gradlew assembleDebug --no-daemon --stacktrace)",
+      "Bash(./gradlew assembleRelease --no-daemon)",
+      "Bash(npx eas-cli *)"
+    ]
+  },
+  "additionalDirectories": [
+    "D:\\CLaudecode\\PickupApp\\android\\app\\src\\main\\res",
+    "D:\\CLaudecode\\PickupApp\\app",
+    "D:\\CLaudecode\\PickupApp\\src\\services",
+    "D:\\CLaudecode\\PickupApp\\src\\components",
+    "D:\\CLaudecode\\PickupApp\\src\\types",
+    "D:\\CLaudecode\\PickupApp\\modules\\expo-app-scanner",
+    "D:\\CLaudecode\\PickupApp\\modules\\expo-ocr-reader",
+    "D:\\CLaudecode\\PickupApp\\modules\\expo-gallery-launcher",
+    "D:\\CLaudecode\\PickupApp\\modules\\expo-pickup-widget"
+  ]
+}

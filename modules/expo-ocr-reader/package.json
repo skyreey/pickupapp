@@ -1,0 +1,5 @@
+{
+  "name": "expo-ocr-reader",
+  "version": "1.0.0",
+  "description": "OCR text recognition module using Google ML Kit"
+}

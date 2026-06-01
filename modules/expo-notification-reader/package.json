@@ -1,0 +1,7 @@
+{
+  "name": "expo-notification-reader",
+  "version": "1.0.0",
+  "description": "Notification listener for shopping app push parsing",
+  "main": "index.ts",
+  "types": "index.ts"
+}

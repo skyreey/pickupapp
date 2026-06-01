@@ -1,0 +1,7 @@
+{
+  "name": "expo-pickup-widget",
+  "version": "1.0.0",
+  "description": "Android homescreen widget showing pending pickup packages",
+  "main": "index.ts",
+  "types": "index.ts"
+}
