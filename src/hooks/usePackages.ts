@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // 包裹列表 Hook
 // ============================================================
 import { useState, useCallback, useEffect } from 'react';
@@ -42,13 +42,17 @@ export function usePackages() {
     loadData();
   }, [filter, sort]);
 
+  // Sync foreground notification count whenever data changes
+  useEffect(() => {
+    refreshPendingCount();
+  }, [packages]);
+
   const loadData = useCallback(() => {
     try {
       const data = getAllPackages(filter === 'expired' ? 'expired' : (filter as PackageStatus | 'all' | 'active'), sort);
       setPackages(data);
       setCounts(getStatusCounts());
       setPickupStats(getPickupStats());
-      refreshPendingCount();
     } catch (e) {
       console.error('加载数据失败:', e);
     } finally {
@@ -163,6 +167,9 @@ export function usePackageDetail(id: string) {
 
   useEffect(() => {
     initDatabase();
+  }, []);
+
+  useEffect(() => {
     const data = getPackageById(id);
     setPkg(data);
     setLoading(false);

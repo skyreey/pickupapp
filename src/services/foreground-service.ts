@@ -1,9 +1,11 @@
-// ============================================================
+﻿// ============================================================
 // 前台服务管理器 —— 通知栏常驻
 // ============================================================
 import { startForeground, updatePendingCount, stopForeground } from '../../modules/expo-pickup-foreground';
 import { getAllPackages } from '../database/dao';
 
+// WARNING: isRunning is a JS-side flag and may get out of sync if the Android system
+// kills the foreground Service independently. Consider querying native Service state.
 let isRunning = false;
 
 /** 启动前台服务（通知栏显示待取数量） */

@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // 数据库初始化 + 建表
 // ============================================================
 import * as SQLite from 'expo-sqlite';
@@ -46,20 +46,29 @@ export function initDatabase(): void {
     );
   `);
 
-  // v2 迁移：为已有数据库添加新列
-  try { database.execSync(`ALTER TABLE packages ADD COLUMN pickup_point_name TEXT;`); } catch (_) {}
-  try { database.execSync(`ALTER TABLE packages ADD COLUMN pickup_point_phone TEXT;`); } catch (_) {}
-  try { database.execSync(`ALTER TABLE packages ADD COLUMN picked_up_at INTEGER NOT NULL DEFAULT 0;`); } catch (_) {}
-  try { database.execSync(`ALTER TABLE packages ADD COLUMN business_hours TEXT;`); } catch (_) {}
-  try { database.execSync(`ALTER TABLE packages ADD COLUMN notes TEXT;`); } catch (_) {}
-  try { database.execSync(`ALTER TABLE packages ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0;`); } catch (_) {}
-  try { database.execSync(`ALTER TABLE packages ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;`); } catch (_) {}
-  try { database.execSync(`ALTER TABLE packages ADD COLUMN sms_raw_text TEXT;`); } catch (_) {}
-  try { database.execSync(`ALTER TABLE packages ADD COLUMN screenshot_paths TEXT;`); } catch (_) {}
-  try { database.execSync(`ALTER TABLE packages ADD COLUMN assigned_to TEXT;`); } catch (_) {}
-  try { database.execSync(`ALTER TABLE packages ADD COLUMN assigned_to_name TEXT;`); } catch (_) {}
-  try { database.execSync(`ALTER TABLE packages ADD COLUMN pushed_by TEXT;`); } catch (_) {}
-  try { database.execSync(`ALTER TABLE packages ADD COLUMN push_status TEXT;`); } catch (_) {}
+  // Safe migration: check column existence via PRAGMA before ALTER (avoids swallowing real errors)
+  const cols = database.getAllSync<{ name: string }>("PRAGMA table_info(packages)");
+  const colNames = new Set(cols.map(c => c.name));
+  const migrations: [string, string][] = [
+    ["pickup_point_name", "TEXT"],
+    ["pickup_point_phone", "TEXT"],
+    ["picked_up_at", "INTEGER NOT NULL DEFAULT 0"],
+    ["business_hours", "TEXT"],
+    ["notes", "TEXT"],
+    ["expires_at", "INTEGER NOT NULL DEFAULT 0"],
+    ["pinned", "INTEGER NOT NULL DEFAULT 0"],
+    ["sms_raw_text", "TEXT"],
+    ["screenshot_paths", "TEXT"],
+    ["assigned_to", "TEXT"],
+    ["assigned_to_name", "TEXT"],
+    ["pushed_by", "TEXT"],
+    ["push_status", "TEXT"],
+  ];
+  for (const [col, def] of migrations) {
+    if (!colNames.has(col)) {
+      database.execSync(`ALTER TABLE packages ADD COLUMN ${col} ${def};`);
+    }
+  }
 
   // 物流轨迹表
   database.execSync(`

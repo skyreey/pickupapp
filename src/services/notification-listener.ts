@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // 通知监听服务
 //
 // 连接原生 NotificationListenerService → 解析推送 → 建包裹
@@ -92,7 +92,21 @@ function stopNotificationListening(): void {
 // 通知处理逻辑
 // ============================================================
 
-const processedHashes = new Set<string>();
+// LRU-based dedup map (auto-evicts oldest entries on overflow)
+class LRUSet {
+  private map = new Map<string, true>();
+  private max: number;
+  constructor(max: number) { this.max = max; }
+  has(v: string) { return this.map.has(v); }
+  add(v: string) {
+    if (this.map.has(v)) this.map.delete(v);
+    this.map.set(v, true);
+    if (this.map.size > this.max) {
+      const first = this.map.keys().next().value;
+      if (first !== undefined) this.map.delete(first);
+    }
+  }
+}const processedHashes = new LRUSet(200);
 
 function handleIncomingNotification(data: NotificationData): void {
   const { packageName, title, text, timestamp } = data;
@@ -105,11 +119,7 @@ function handleIncomingNotification(data: NotificationData): void {
   if (processedHashes.has(hash)) return;
   processedHashes.add(hash);
 
-  if (processedHashes.size > 200) {
-    const arr = [...processedHashes];
-    processedHashes.clear();
-    arr.slice(-100).forEach(h => processedHashes.add(h));
-  }
+
 
   // 解析通知内容（商品名 + 快递单号 + 快递公司）
   const result = parseNotification(packageName, title, text);

@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // SMS 监听服务
 //
 // 连接原生模块 → 解析取件码 → 匹配已有包裹 → 写入数据库
@@ -231,7 +231,21 @@ function handleHistoricalSms(data: SmsData): void {
 }
 
 // 去重用的 hash 集合
-const processedHashes = new Set<string>();
+// LRU-based dedup map (auto-evicts oldest entries on overflow)
+class LRUSet {
+  private map = new Map<string, true>();
+  private max: number;
+  constructor(max: number) { this.max = max; }
+  has(v: string) { return this.map.has(v); }
+  add(v: string) {
+    if (this.map.has(v)) this.map.delete(v);
+    this.map.set(v, true);
+    if (this.map.size > this.max) {
+      const first = this.map.keys().next().value;
+      if (first !== undefined) this.map.delete(first);
+    }
+  }
+}const processedHashes = new LRUSet(200);
 
 /** 处理单条 SMS：解析 → 去重 → 匹配已有包裹 → 新建或更新 */
 function handleIncomingSms(data: SmsData): void {
@@ -242,11 +256,7 @@ function handleIncomingSms(data: SmsData): void {
   if (processedHashes.has(hash)) return;
   processedHashes.add(hash);
 
-  if (processedHashes.size > 200) {
-    const arr = [...processedHashes];
-    processedHashes.clear();
-    arr.slice(-100).forEach(h => processedHashes.add(h));
-  }
+
 
   // 解析短信
   const result = parseSms(body, sender);

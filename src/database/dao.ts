@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // 数据访问层 —— 包裹和物流轨迹的 CRUD
 // ============================================================
 import { getDatabase } from './index';
@@ -64,7 +64,8 @@ export function getAllPackages(status?: PackageStatus | 'all' | 'active' | 'expi
   }
 
   // 排序：置顶优先 → 用户选择排序
-  const orderBy = (() => {
+    // Safe: orderBy values come from PackageSort literal union via switch, no injection risk
+const orderBy = (() => {
     switch (sort) {
       case 'time-asc': return 'ORDER BY pinned DESC, created_at ASC';
       case 'station': return 'ORDER BY pinned DESC, pickup_point_name ASC, created_at DESC';
