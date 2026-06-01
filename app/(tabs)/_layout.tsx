@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // Tab 导航布局 — iOS 风格底部标签栏
 // ============================================================
 import { useEffect } from 'react';
@@ -6,6 +6,7 @@ import { Tabs, useRouter } from 'expo-router';
 import { Text, Pressable, Alert, AppState } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { FontSize, useColors } from '../../src/constants/theme';
+import { ErrorBoundary } from '../../src/components/ErrorBoundary';
 import { initSmsListener } from '../../src/services/sms-listener';
 import { initNotificationListener } from '../../src/services/notification-listener';
 import { loadSettings, getHasSeenOnboarding } from '../../src/services/settings-store';
@@ -40,6 +41,7 @@ export default function TabLayout() {
     let cleanupSms: (() => void) | undefined;
     let cleanupNotification: (() => void) | undefined;
     let cleanupAppState: (() => void) | undefined;
+  let cleanupClipboard: (() => void) | undefined;
 
     (async () => {
       await loadSettings();
@@ -100,8 +102,7 @@ export default function TabLayout() {
       cleanupAppState?.();
     };
   }, []);
-  return (
-    <Tabs
+  return (`r`n    <ErrorBoundary>`r`n    <Tabs
       screenOptions={{
         headerStyle: { backgroundColor: colors.navBar },
         headerTitleStyle: {
@@ -152,6 +153,5 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <Text style={{ fontSize: 22 }}>⚙️</Text>,
         }}
       />
-    </Tabs>
-  );
+    </Tabs>`r`n    </ErrorBoundary>`r`n  );
 }

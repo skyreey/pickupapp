@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // 取件提醒调度器 —— 定时检查已入库包裹
 // ============================================================
 import { getAllPackages, markAsPickedUp } from '../database/dao';
@@ -119,6 +119,24 @@ function checkPackages(): void {
   }
 }
 
+
+// Dedicated notification channel for pickup reminders (user-controllable in system settings)
+const CHANNEL_ID = "pickup-reminders";
+import { Platform } from "react-native";
+
+async function ensureNotificationChannel(): Promise<void> {
+  if (Platform.OS !== "android") return;
+  try {
+    await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
+      name: "取件提醒",
+      description: "包裹到站、截止时间和过期提醒",
+      importance: Notifications.AndroidImportance.HIGH,
+      sound: "default",
+      vibrationPattern: [0, 250, 250, 250],
+    });
+  } catch {}
+}
+ensureNotificationChannel();
 /** 截止前提醒：距截止不到24小时 */
 async function sendDeadlineReminder(pkg: Package, hoursLeft: number): Promise<void> {
   try {
@@ -140,6 +158,7 @@ async function sendDeadlineReminder(pkg: Package, hoursLeft: number): Promise<vo
 
     await Notifications.scheduleNotificationAsync({
       content: {
+        channelId: CHANNEL_ID,
         title,
         body: bodyParts.join('\n'),
         data: { packageId: pkg.id, type: 'deadline' },
@@ -165,6 +184,7 @@ async function sendExpiryNotification(pkg: Package): Promise<void> {
 
     await Notifications.scheduleNotificationAsync({
       content: {
+        channelId: CHANNEL_ID,
         title,
         body: bodyParts.join('\n'),
         data: { packageId: pkg.id, type: 'expiry' },
@@ -191,6 +211,7 @@ async function sendReminderNotification(pkg: Package): Promise<void> {
 
     await Notifications.scheduleNotificationAsync({
       content: {
+        channelId: CHANNEL_ID,
         title,
         body: bodyParts.join('\n'),
         data: { packageId: pkg.id, type: 'reminder' },
