@@ -60,3 +60,37 @@ export async function callPhoneNumber(phone: string): Promise<void> {
 async function canOpen(url: string): Promise<boolean> {
   try { return await Linking.canOpenURL(url); } catch { return false; }
 }
+
+/**
+ * 导航前确认对话框
+ * 建议用户先打电话确认位置，再导航
+ */
+export function navigateWithConfirm(
+  address: string,
+  phone: string | null | undefined,
+  stationName?: string | null,
+): void {
+  const name = stationName || '驿站';
+  const buttons: Array<{ text: string; style?: 'cancel' | 'destructive'; onPress?: () => void }> = [
+    { text: '取消', style: 'cancel' },
+    {
+      text: '直接导航',
+      onPress: () => navigateToAddress(address, stationName),
+    },
+  ];
+
+  if (phone) {
+    buttons.splice(1, 0, {
+      text: `拨打 ${phone}`,
+      onPress: () => callPhoneNumber(phone),
+    });
+  }
+
+  Alert.alert(
+    `导航到 ${name}`,
+    phone
+      ? `建议先打电话确认位置\n\n📞 ${phone}`
+      : '建议先打电话确认位置',
+    buttons,
+  );
+}

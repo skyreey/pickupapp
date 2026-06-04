@@ -85,7 +85,7 @@ export function SwipeableCard({
           background={TouchableNativeFeedback.Ripple('#ffffff44', false)}
         >
           <View style={[styles.actionBtn, styles.pinBtn]}>
-            <Text style={styles.actionText}>{pkg.pinned ? '📌 取消' : '📌 置顶'}</Text>
+            <Text style={styles.actionText}>{pkg.pinned ? '📦 取消' : '📦 置顶'}</Text>
           </View>
         </TouchableNativeFeedback>
         {/* 分享 */}

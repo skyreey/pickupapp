@@ -1,0 +1,6 @@
+{
+  "*.{ts,tsx}": [
+    "tsc --noEmit",
+    "jest --bail --findRelatedTests"
+  ]
+}

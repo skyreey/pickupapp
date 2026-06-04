@@ -1,0 +1,17 @@
+{
+  "name": "pickupapp-activation-server",
+  "version": "1.0.0",
+  "description": "取件通 Pro 激活码签发与验证服务",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "generate": "node generate-code.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
+    "better-sqlite3": "^11.6.0",
+    "express-rate-limit": "^7.4.0"
+  }
+}

@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // Tab 导航布局 — iOS 风格底部标签栏
 // ============================================================
 import { useEffect } from 'react';
@@ -6,13 +6,17 @@ import { Tabs, useRouter } from 'expo-router';
 import { Text, Pressable, Alert, AppState } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { FontSize, useColors } from '../../src/constants/theme';
-import { ErrorBoundary } from '../../src/components/ErrorBoundary';
 import { initSmsListener } from '../../src/services/sms-listener';
 import { initNotificationListener } from '../../src/services/notification-listener';
 import { loadSettings, getHasSeenOnboarding } from '../../src/services/settings-store';
 import { refreshWidget } from '../../src/services/widget-refresh';
 import { startScheduler } from '../../src/services/tracker-scheduler';
 import { parseSms } from '../../src/services/sms-parser';
+import { autoUpdateConfig } from '../../src/services/remote-config';
+import { flushNotifications } from '../../src/services/notification-service';
+import { createLogger } from '../../src/utils/logger';
+
+const log = createLogger('AppStartup');
 
 // 转发导入的暂存文本（其他App分享短信到取件通时暂存）
 let pendingSharedText: string | null = null;
@@ -41,11 +45,30 @@ export default function TabLayout() {
     let cleanupSms: (() => void) | undefined;
     let cleanupNotification: (() => void) | undefined;
     let cleanupAppState: (() => void) | undefined;
-  let cleanupClipboard: (() => void) | undefined;
 
     (async () => {
       await loadSettings();
+      log.info('设置加载完成');
+
+      // DEBUG: 开发版自动开通永久VIP
+      if (__DEV__) {
+        const { isMembershipActive } = require('../../src/services/settings-store');
+        isMembershipActive(); // 触发自动激活
+      }
+
+      // 后台拉取远程快递规则（失败静默降级）
+      autoUpdateConfig();
+
+      // 云端恢复会员（换手机/清数据后自动恢复）
+      const { isMembershipActive, restoreFromCloud } = require('../../src/services/settings-store');
+      if (!isMembershipActive()) {
+        const restored = await restoreFromCloud();
+        if (restored) log.info('会员已从云端恢复');
+        else log.debug('云端无会员记录，保持免费版');
+      }
+
       if (!getHasSeenOnboarding()) {
+        log.info('首次使用，跳转引导页');
         router.replace('/onboarding');
         return;
       }
@@ -90,10 +113,15 @@ export default function TabLayout() {
       await checkClipboard();
 
       // 每次回到前台也检查剪贴板
+      // 回到前台检查剪贴板
       const sub = AppState.addEventListener('change', (state) => {
         if (state === 'active') checkClipboard();
       });
-      cleanupAppState = () => sub.remove();
+      // 进入后台时刷新合并通知队列
+      const bgSub = AppState.addEventListener('change', (state) => {
+        if (state === 'background') flushNotifications();
+      });
+      cleanupAppState = () => { sub.remove(); bgSub.remove(); };
     })();
 
     return () => {
@@ -102,7 +130,8 @@ export default function TabLayout() {
       cleanupAppState?.();
     };
   }, []);
-  return (`r`n    <ErrorBoundary>`r`n    <Tabs
+  return (
+    <Tabs
       screenOptions={{
         headerStyle: { backgroundColor: colors.navBar },
         headerTitleStyle: {
@@ -153,5 +182,6 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <Text style={{ fontSize: 22 }}>⚙️</Text>,
         }}
       />
-    </Tabs>`r`n    </ErrorBoundary>`r`n  );
+    </Tabs>
+  );
 }

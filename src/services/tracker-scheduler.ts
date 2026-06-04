@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // 取件提醒调度器 —— 定时检查已入库包裹
 // ============================================================
 import { getAllPackages, markAsPickedUp } from '../database/dao';
@@ -10,6 +10,10 @@ import {
 import { refreshPendingCount, startForegroundService, stopForegroundService } from './foreground-service';
 import * as Notifications from 'expo-notifications';
 import type { Package } from '../models';
+import { isTimeSensitiveStation } from '../utils/formatters';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('TrackerScheduler');
 
 const CHECK_INTERVAL = 2 * 60 * 60 * 1000; // 每 2 小时
 const ONE_DAY = 24 * 60 * 60 * 1000;
@@ -110,33 +114,25 @@ function checkPackages(): void {
         reminded.add(pkg.id);
         sendReminderNotification(pkg);
       }
+
+      // 快递柜时效紧急提醒（<2小时，仅快递柜类站点）
+      if (isTimeSensitiveStation(pkg.pickupPointName) && pkg.expiresAt > 0) {
+        const hrsLeft = (pkg.expiresAt - now) / (60 * 60 * 1000);
+        const urgentKey = `${pkg.id}--urgent`;
+        if (hrsLeft > 0 && hrsLeft <= 2 && !reminded.has(urgentKey)) {
+          reminded.add(urgentKey);
+          sendUrgentTimeLimitNotification(pkg, hrsLeft);
+        }
+      }
     }
 
     persistState();
     refreshPendingCount();
   } catch (e) {
-    console.error('tracker-scheduler 检查失败:', e);
+    log.error('调度检查失败', { error: String(e) });
   }
 }
 
-
-// Dedicated notification channel for pickup reminders (user-controllable in system settings)
-const CHANNEL_ID = "pickup-reminders";
-import { Platform } from "react-native";
-
-async function ensureNotificationChannel(): Promise<void> {
-  if (Platform.OS !== "android") return;
-  try {
-    await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
-      name: "取件提醒",
-      description: "包裹到站、截止时间和过期提醒",
-      importance: Notifications.AndroidImportance.HIGH,
-      sound: "default",
-      vibrationPattern: [0, 250, 250, 250],
-    });
-  } catch {}
-}
-ensureNotificationChannel();
 /** 截止前提醒：距截止不到24小时 */
 async function sendDeadlineReminder(pkg: Package, hoursLeft: number): Promise<void> {
   try {
@@ -158,16 +154,16 @@ async function sendDeadlineReminder(pkg: Package, hoursLeft: number): Promise<vo
 
     await Notifications.scheduleNotificationAsync({
       content: {
-        channelId: CHANNEL_ID,
         title,
         body: bodyParts.join('\n'),
-        data: { packageId: pkg.id, type: 'deadline' },
+        categoryIdentifier: 'pickup',
+      data: { packageId: pkg.id, type:'deadline' },
         sound: 'default',
       },
       trigger: null,
     });
-  } catch {
-    // 静默失败
+  } catch (e) {
+    log.warn('发送通知失败', { error: String(e) });
   }
 }
 
@@ -184,16 +180,16 @@ async function sendExpiryNotification(pkg: Package): Promise<void> {
 
     await Notifications.scheduleNotificationAsync({
       content: {
-        channelId: CHANNEL_ID,
         title,
         body: bodyParts.join('\n'),
-        data: { packageId: pkg.id, type: 'expiry' },
+        categoryIdentifier: 'pickup',
+      data: { packageId: pkg.id, type:'expiry' },
         sound: 'default',
       },
       trigger: null,
     });
-  } catch {
-    // 静默失败
+  } catch (e) {
+    log.warn('发送通知失败', { error: String(e) });
   }
 }
 
@@ -211,15 +207,47 @@ async function sendReminderNotification(pkg: Package): Promise<void> {
 
     await Notifications.scheduleNotificationAsync({
       content: {
-        channelId: CHANNEL_ID,
         title,
         body: bodyParts.join('\n'),
-        data: { packageId: pkg.id, type: 'reminder' },
+        categoryIdentifier: 'pickup',
+      data: { packageId: pkg.id, type:'reminder' },
         sound: 'default',
       },
       trigger: null,
     });
-  } catch {
-    // 静默失败
+  } catch (e) {
+    log.warn('发送通知失败', { error: String(e) });
+  }
+}
+
+/** 快递柜时效紧急提醒（剩余不到2小时） */
+async function sendUrgentTimeLimitNotification(pkg: Package, hoursLeft: number): Promise<void> {
+  try {
+    const mins = Math.round(hoursLeft * 60);
+    const timeLabel = mins <= 30
+      ? `只剩${mins}分钟`
+      : `只剩${Math.floor(hoursLeft)}小时`;
+
+    const title = pkg.productName
+      ? `⚠ "${pkg.productName}" ${timeLabel}！`
+      : `⚠ ${pkg.carrierName}包裹${timeLabel}！`;
+
+    const bodyParts = ['快递柜取件码即将超时，请尽快取件！'];
+    if (pkg.pickupCode) bodyParts.push(`取件码：${pkg.pickupCode}`);
+    if (pkg.pickupPointName) bodyParts.push(`取件点：${pkg.pickupPointName}`);
+    bodyParts.push('超时后需联系快递员重新投放');
+
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body: bodyParts.join('\n'),
+        categoryIdentifier: 'pickup',
+      data: { packageId: pkg.id, type:'urgent_timelimit' },
+        sound: 'default',
+      },
+      trigger: null,
+    });
+  } catch (e) {
+    log.warn('发送通知失败', { error: String(e) });
   }
 }

@@ -66,6 +66,40 @@ export interface Package {
   pushStatus: string | null;    // 推送状态：pending/received/done
 }
 
+// ============================================================
+// 会员体系
+// ============================================================
+
+/** 会员等级 */
+export type MembershipTier = 'monthly' | 'yearly' | 'lifetime';
+
+/** 激活方式 */
+export type ActivationMethod = 'alipay' | 'wechat' | 'code';
+
+/** 会员状态 */
+export interface Membership {
+  active: boolean;               // 是否已激活
+  tier: MembershipTier | null;   // 当前等级
+  activatedAt: number;           // 激活时间戳
+  expiresAt: number;             // 到期时间戳（永久会员为 0）
+  method: ActivationMethod | null; // 激活方式
+  code: string | null;           // 使用的激活码（method=code时有值）
+  _sig?: string;                 // 防篡改签名（内部字段）
+}
+
+/** 会员等级显示配置 */
+export interface MembershipTierConfig {
+  key: MembershipTier;
+  name: string;                  // 月度VIP / 年度VIP / 永久VIP
+  nameShort: string;             // 月度 / 年度 / 永久
+  price: string;                 // ¥3.99
+  amount: number;                // 3.99
+  period: string;                // 月 / 年 / 永久
+  desc: string;                  // 描述文案
+  color: string;                 // 徽章金色调
+  durationDays: number;          // 有效天数（永久=0）
+}
+
 /** 家庭成员 */
 export interface FamilyMember {
   id: string;
@@ -94,6 +128,7 @@ export interface ParsedSmsResult {
   stationPhone: string | null;  // 快递点联系电话
   businessHours?: string;       // 快递点营业时间
   trackingNumber?: string;      // 从短信中提取的快递单号
+  tailNumber?: string;          // 快递单号尾号（如短信中"尾号1234"）
 }
 
 /** 通知推送解析结果 */

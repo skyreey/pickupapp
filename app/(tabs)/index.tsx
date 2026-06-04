@@ -12,6 +12,7 @@ import { PackageCard } from '../../src/components/PackageCard';
 import { SwipeableCard } from '../../src/components/SwipeableCard';
 import { PackageGroupList } from '../../src/components/PackageGroupList';
 import { EmptyState } from '../../src/components/EmptyState';
+import { GeofenceBanner } from '../../src/components/GeofenceBanner';
 import { markAsPickedUp, updatePackageStatus, deletePackage, type PackageSort } from '../../src/database/dao';
 import type { Package } from '../../src/models';
 import {
@@ -21,11 +22,15 @@ import { useResponsive } from '../../src/hooks/useResponsive';
 import type { ResponsiveConstants } from '../../src/hooks/useResponsive';
 import { rescanInboxSms } from '../../src/services/sms-listener';
 import { formatPackageForShare } from '../../src/utils/formatters';
+import { getLargeFontMode } from '../../src/services/settings-store';
+import { ErrorBoundary } from '../../src/components/ErrorBoundary';
+import { BatchCodeSheet } from '../../src/components/BatchCodeSheet';
+import { batchMarkAsPickedUp } from '../../src/database/dao';
 
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'stored', label: '待取件' },
-  { key: 'proxy', label: '代取' },
   { key: 'picked_up', label: '已取件' },
+  { key: 'proxy', label: '代取' },
   { key: 'expired', label: '已过期' },
 ];
 
@@ -54,7 +59,10 @@ export default function HomeScreen() {
   const [query, setQuery] = useState('');
   const [viewMode, setViewMode] = useState<'list' | 'group'>('group');
   const [showSortPicker, setShowSortPicker] = useState(false);
+  const [batchSheetVisible, setBatchSheetVisible] = useState(false);
+  const [batchSheetGroup, setBatchSheetGroup] = useState<{ name: string; address: string; packages: Package[] } | null>(null);
   const initialRefreshDone = useRef(false);
+  const largeMode = getLargeFontMode();
 
   // 包裹刷新 + SMS 扫描
   const refreshWithScan = useCallback(() => {
@@ -91,9 +99,12 @@ export default function HomeScreen() {
     };
   }, [refresh]);
 
+  // 搜索防抖：300ms 内无新输入才执行查询
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleSearch = useCallback((text: string) => {
     setQuery(text);
-    search(text);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => search(text), 300);
   }, [search]);
 
   // 获取当前排序标签
@@ -109,6 +120,12 @@ export default function HomeScreen() {
     } catch {
       // 用户取消分享
     }
+  }, []);
+
+  // 取件码一览面板
+  const handleBatchCodes = useCallback((group: { name: string; address: string; packages: Package[] }) => {
+    setBatchSheetGroup(group);
+    setBatchSheetVisible(true);
   }, []);
 
   // 批量分享
@@ -130,6 +147,7 @@ export default function HomeScreen() {
   }, [packages, selectedIds]);
 
   return (
+    <ErrorBoundary>
     <View style={styles.container}>
       {/* 顶部操作栏 */}
       <View style={styles.topBar}>
@@ -153,9 +171,12 @@ export default function HomeScreen() {
             </>
           ) : (
             <>
+              {!largeMode ? (
               <Pressable onPress={() => setShowSortPicker(!showSortPicker)}>
                 <Text style={styles.topBarAction}>⇅ {currentSortLabel}</Text>
               </Pressable>
+            ) : null}
+            {!largeMode ? (
               <Pressable
                 onPress={() => setViewMode(viewMode === 'list' ? 'group' : 'list')}
               >
@@ -163,6 +184,7 @@ export default function HomeScreen() {
                   {viewMode === 'list' ? '分组' : '列表'}
                 </Text>
               </Pressable>
+            ) : null}
               <Pressable onPress={enterEditMode}>
                 <Text style={styles.topBarAction}>编辑</Text>
               </Pressable>
@@ -187,6 +209,58 @@ export default function HomeScreen() {
           ))}
         </View>
       ) : null}
+
+      {/* 地理围栏提醒 */}
+      <GeofenceBanner onPress={(alerts) => {
+        // 点击横幅跳到对应驿站筛选
+        if (alerts.length > 0) {
+          Alert.alert(
+            '附近待取包裹',
+            alerts.map(a =>
+              `${a.stationName} (${a.distance}m)\n${a.packageCount}个包裹：${a.packages.map(p => p.productName).join('、')}`
+            ).join('\n\n'),
+            [{ text: '知道了', style: 'default' }],
+          );
+        }
+      }} />
+
+      {/* ======== 到期预警横幅 ======== */}
+      {(() => {
+        const now = Date.now();
+        const day = 24 * 60 * 60 * 1000;
+        const tonight: Package[] = [];
+        const tomorrow: Package[] = [];
+        for (const p of packages) {
+          if (!p.expiresAt || p.expiresAt <= 0 || p.currentStatus === 'picked_up') continue;
+          const left = p.expiresAt - now;
+          if (left <= 0) continue; // 已过期
+          if (left <= day) tonight.push(p);
+          else if (left <= day * 2) tomorrow.push(p);
+        }
+        const total = tonight.length + tomorrow.length;
+        if (total === 0) return null;
+
+        const parts: string[] = [];
+        if (tonight.length > 0) parts.push(`${tonight.length}个今晚截止`);
+        if (tomorrow.length > 0) parts.push(`${tomorrow.length}个明天截止`);
+        const hasUrgent = tonight.length > 0;
+
+        return (
+          <Pressable
+            style={[styles.expiryBanner, {
+              backgroundColor: hasUrgent ? '#FFF3E0' : '#FFF8E1',
+              borderColor: hasUrgent ? '#FF9800' : '#FFC107',
+            }]}
+            onPress={() => setFilter('stored')}
+          >
+            <Text style={styles.expiryIcon}>⏰</Text>
+            <Text style={[styles.expiryText, { color: hasUrgent ? colors.error : '#E65100' }]}>
+              {parts.join('，')}，请尽快取件
+            </Text>
+            <Text style={styles.expiryArrow}>›</Text>
+          </Pressable>
+        );
+      })()}
 
       {/* 筛选标签 */}
       <View style={styles.filterRow}>
@@ -215,6 +289,7 @@ export default function HomeScreen() {
       </View>
 
       {/* 搜索框 */}
+      {!largeMode ? (
       <View style={styles.searchBox}>
         <Text style={styles.searchIcon}>🔍</Text>
         <TextInput
@@ -231,6 +306,7 @@ export default function HomeScreen() {
           </Pressable>
         ) : null}
       </View>
+      ) : null}
 
       {/* 列表 / 分组切换 */}
       {viewMode === 'list' ? (
@@ -311,8 +387,9 @@ export default function HomeScreen() {
       ) : (
         <View style={{ flex: 1 }}>
           <ScrollView
-            contentContainerStyle={packages.length === 0 ? styles.emptyContainer : undefined}
+            contentContainerStyle={packages.length === 0 ? styles.emptyContainer : { flexGrow: 1 }}
             showsVerticalScrollIndicator={false}
+            alwaysBounceVertical
             refreshControl={
               <RefreshControl
                 refreshing={loading}
@@ -368,6 +445,7 @@ export default function HomeScreen() {
                 }}
                 onTogglePin={(id) => togglePin(id)}
                 onShare={(pkg) => handleSharePackage(pkg)}
+                onBatchCodes={handleBatchCodes}
               />
             )}
           </ScrollView>
@@ -391,6 +469,16 @@ export default function HomeScreen() {
         </View>
       )}
     </View>
+
+    {/* 取件码大字一览面板 */}
+    <BatchCodeSheet
+      visible={batchSheetVisible}
+      group={batchSheetGroup}
+      onClose={() => setBatchSheetVisible(false)}
+      onMarkedAll={() => refresh()}
+    />
+
+    </ErrorBoundary>
   );
 }
 
@@ -520,6 +608,28 @@ const createStyles = (colors: ColorScheme, r: ResponsiveConstants) => StyleSheet
   },
   emptyContainer: {
     flexGrow: 1,
+  },
+  // 到期预警横幅
+  expiryBanner: {
+    flexDirection: 'row', alignItems: 'center',
+    marginHorizontal: r.scaledSpacing.lg,
+    marginBottom: r.scaledSpacing.sm,
+    borderRadius: r.scaledBorderRadius.lg,
+    paddingVertical: r.scaledSpacing.md,
+    paddingHorizontal: r.scaledSpacing.lg,
+    borderWidth: 1,
+    gap: r.scaledSpacing.sm,
+  },
+  expiryIcon: { fontSize: r.scaledFontSize.title3 },
+  expiryText: {
+    flex: 1,
+    fontSize: r.scaledFontSize.subhead,
+    fontWeight: '600',
+  },
+  expiryArrow: {
+    fontSize: 22,
+    fontWeight: '300',
+    color: '#8E8E93',
   },
   pickupStatsBanner: {
     backgroundColor: colors.surface,

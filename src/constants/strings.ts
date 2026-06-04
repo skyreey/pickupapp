@@ -17,7 +17,7 @@ export const PACKAGE_STATUS: Record<string, string> = {
 export const SETTINGS = {
   pickupPro: '取件通 Pro',
   proMembership: 'Pro 会员已激活',
-  proBenefits: '无限包裹 · 全家共享 · 优先支持',
+  proBenefits: '无限包裹 · 成员共享 · 优先支持',
   freeTier: '免费版',
   accountSetup: '账号设置',
   myPhone: '我的手机号',

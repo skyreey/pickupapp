@@ -1,8 +1,11 @@
 // ============================================================
 // 快递取件码短信解析引擎
 //
-// Pipeline: 过滤 → 取件码提取 → 公司识别 → 地址提取 → 时间提取
+// Pipeline: 过滤 → 正则匹配 → 字段提取
+// 正则失败 → 分词兜底（cn-tokenizer）
 // ============================================================
+import { extractByTokenizer } from './cn-tokenizer';
+import { guessCarrierByTrackingNumber } from './carrier-utils';
 import { SMS_PATTERN_RULES, COURIER_INFO } from '../patterns/sms-patterns';
 import type { SmsPatternRule } from '../patterns/sms-patterns';
 import type { ParsedSmsResult, CarrierCode } from '../models';
@@ -16,45 +19,83 @@ import { normalizeText, isValidAddress } from '../utils/formatters';
  * 解析短信，返回取件码信息，或 null（非快递短信）
  */
 export function parseSms(body: string, sender?: string): ParsedSmsResult | null {
+  const core = _parseSmsCore(body, sender);
+  if (!core || !core.code) return null;  // 必须提取到取件码
+  const { code, text: _, matchedRule: __, extractedCourier: ___, ...result } = core;
+  return { ...result, code };
+}
+
+/**
+ * 解析历史短信（不要求取件码 — 处理已取件/已签收等消息）
+ * 返回 ParsedSmsResult 但 code 可能为空，status 字段指示包裹状态
+ */
+export function parseHistoricalSms(
+  body: string,
+  sender?: string,
+): (ParsedSmsResult & { status: 'stored' | 'picked_up' | 'shipped' }) | null {
+  const core = _parseSmsCore(body, sender);
+  if (!core) return null;
+
+  // 检测包裹状态
+  let status: 'stored' | 'picked_up' | 'shipped' = 'stored';
+  if (/已签收|已取件|已取出|已领取|已提货|被签收|已收货/.test(core.text)) {
+    status = 'picked_up';
+  } else if (/已发货|已发出|已揽收|运输中|派送中|正在配送/.test(core.text)) {
+    status = 'shipped';
+  }
+
+  const { text: _, matchedRule: __, extractedCourier: ___, ...result } = core;
+  return { ...result, code: core.code || '', status };
+}
+
+// ============================================================
+// 核心解析（parseSms + parseHistoricalSms 共享逻辑）
+// ============================================================
+
+interface CoreParseResult extends ParsedSmsResult {
+  text: string;
+  matchedRule: SmsPatternRule | null;
+  extractedCourier: { code: CarrierCode; name: string } | null;
+}
+
+function _parseSmsCore(body: string, sender: string | undefined): CoreParseResult | null {
   const text = normalizeText(body);
   if (!text) return null;
 
-  // 0. 排除非快递短信（银行/支付/验证码/营销等）
   if (isNonDeliverySms(text)) return null;
 
-  // 1. 过滤：快速判断是否为快递短信
   const matchedRule = findMatchingRule(text, sender || '');
-  if (!matchedRule) return null;
 
-  // 2. 提取取件码
-  const code = extractCode(text, matchedRule);
-  if (!code) return null;
+  // 正则匹配失败 → 分词兜底
+  if (!matchedRule) {
+    const tokenResult = extractByTokenizer(text);
+    if (!tokenResult) return null;
+    return {
+      code: tokenResult.code ?? '',
+      company: tokenResult.company,
+      companyName: tokenResult.companyName,
+      address: tokenResult.address || '',
+      expiresAt: tokenResult.expiresAt || null,
+      stationName: tokenResult.stationName || null,
+      stationPhone: tokenResult.stationPhone || null,
+      text,
+      matchedRule: null,
+      extractedCourier: null,
+    };
+  }
 
-  // 3. 识别快递公司（已经由 findMatchingRule 确定了 company）
+  const code = extractCode(text, matchedRule) || '';
   const company = matchedRule.courier.code;
-
-  // 4. 提取地址
   const address = extractAddress(text, matchedRule) || '';
-
-  // 5. 提取过期时间
   const expiresAt = extractExpireTime(text, matchedRule);
-
-  // 6. 提取联系电话
   const stationPhone = extractPhone(text, matchedRule);
-
-  // 7. 提取站点名称
   const stationName = extractStationName(text, matchedRule);
-
-  // 7.5. 提取营业时间
   const businessHours = extractBusinessHours(text, matchedRule);
-
-  // 尝试从正文提取真正的快递公司（覆盖菜鸟等兜底规则的硬编码名）
+  const tailNumber = extractTailNumber(text);
   const extractedCourier = extractCourierFromText(text);
-  // 尝试从正文提取快递单号
   const trackingNumber = extractTrackingFromText(text);
 
-  // 兜底快递公司：如果规则匹配的是平台（菜鸟/丰巢）而非快递公司，且正文没提取到快递名
-  // 则标记为 unknown，不把"菜鸟驿站"当作快递公司
+  // 兜底快递公司：平台规则（菜鸟/丰巢）不硬编码为快递名
   const isPlatformRule = company === 'cainiao' || company === 'fengchao';
   const finalCompany = extractedCourier?.code
     || (!isPlatformRule ? company : (trackingNumber ? guessCarrierByTrackingNumber(trackingNumber).code : 'unknown'));
@@ -71,6 +112,10 @@ export function parseSms(body: string, sender?: string): ParsedSmsResult | null 
     stationPhone,
     businessHours,
     trackingNumber: trackingNumber ?? undefined,
+    tailNumber: tailNumber ?? undefined,
+    text,
+    matchedRule,
+    extractedCourier,
   };
 }
 
@@ -312,79 +357,6 @@ function parseExpireTimeString(str: string): number | null {
   return null;
 }
 
-/**
- * 解析历史短信（不要求取件码 — 处理已取件/已签收等消息）
- * 返回 ParsedSmsResult 但 code 可能为空，status 字段指示包裹状态
- */
-export function parseHistoricalSms(
-  body: string,
-  sender?: string,
-): (ParsedSmsResult & { status: 'stored' | 'picked_up' | 'shipped' }) | null {
-  const text = normalizeText(body);
-  if (!text) return null;
-
-  if (isNonDeliverySms(text)) return null;
-
-  const matchedRule = findMatchingRule(text, sender || '');
-  if (!matchedRule) return null;
-
-  const code = extractCode(text, matchedRule) || '';
-
-  // 检测包裹状态
-  let status: 'stored' | 'picked_up' | 'shipped' = 'stored';
-  if (/已签收|已取件|已取出|已领取|已提货|被签收|已收货/.test(text)) {
-    status = 'picked_up';
-  } else if (/已发货|已发出|已揽收|运输中|派送中|正在配送/.test(text)) {
-    status = 'shipped';
-  }
-
-  // 尝试提取快递单号
-  const trackingNumber = extractTrackingFromText(text) || '';
-
-  // 尝试从正文提取真正的快递公司（覆盖菜鸟等兜底规则）
-  const extractedCourier = extractCourierFromText(text);
-
-  const address = extractAddress(text, matchedRule) || '';
-  const stationPhone = extractPhone(text, matchedRule);
-  const stationName = extractStationName(text, matchedRule);
-  const businessHours = extractBusinessHours(text, matchedRule);
-  const expiresAt = extractExpireTime(text, matchedRule);
-
-  // 确定快递公司：正文提取 > 单号推断 > 规则兜底（但不把平台名当快递名）
-  const isPlatformRule = matchedRule.courier.code === 'cainiao' || matchedRule.courier.code === 'fengchao';
-  let finalCompany: CarrierCode;
-  let finalCompanyName: string;
-  if (extractedCourier) {
-    finalCompany = extractedCourier.code;
-    finalCompanyName = extractedCourier.name;
-  } else if (trackingNumber) {
-    const guess = guessCarrierByTrackingNumber(trackingNumber);
-    if (guess.code !== 'unknown') {
-      finalCompany = guess.code;
-      finalCompanyName = guess.name;
-    } else {
-      finalCompany = isPlatformRule ? 'unknown' : matchedRule.courier.code;
-      finalCompanyName = isPlatformRule ? '快递' : matchedRule.courier.name;
-    }
-  } else {
-    finalCompany = isPlatformRule ? 'unknown' : matchedRule.courier.code;
-    finalCompanyName = isPlatformRule ? '快递' : matchedRule.courier.name;
-  }
-
-  return {
-    code,
-    company: finalCompany,
-    companyName: finalCompanyName,
-    address,
-    expiresAt,
-    stationName,
-    stationPhone,
-    businessHours,
-    status,
-    trackingNumber: trackingNumber || undefined,
-  };
-}
-
 // ============================================================
 // 从短信正文提取真正的快递公司（覆盖规则的兜底值"菜鸟驿站"）
 // ============================================================
@@ -438,23 +410,138 @@ function extractTrackingFromText(text: string): string | null {
   return null;
 }
 
-/** 根据快递单号前缀推断快递公司 */
-export function guessCarrierByTrackingNumber(tn: string): { code: CarrierCode; name: string } {
-  const upper = tn.toUpperCase();
-  if (upper.startsWith('SF'))    return { code: 'shunfeng',  name: '顺丰速运' };
-  if (upper.startsWith('YT'))    return { code: 'yuantong',  name: '圆通速递' };
-  if (upper.startsWith('JT'))    return { code: 'jitu',      name: '极兔速递' };
-  if (upper.startsWith('JD'))    return { code: 'jingdong',  name: '京东快递' };
-  if (upper.startsWith('STO'))   return { code: 'shentong',  name: '申通快递' };
-  if (upper.startsWith('YUNDA')) return { code: 'yunda',     name: '韵达快递' };
-  if (upper.startsWith('DPK'))   return { code: 'deppon',    name: '德邦快递' };
-  if (/^[A-Z]{2}\d{9,13}$/.test(upper)) return { code: 'ems', name: '邮政EMS' };
-
-  // 数字开头的推断
-  if (/^77\d{10,}/.test(upper) || /^78\d{10,}/.test(upper))
-    return { code: 'zhongtong', name: '中通快递' };
-  if (/^88\d{10,}/.test(upper))
-    return { code: 'ems', name: '邮政EMS' };
-
-  return { code: 'unknown', name: '快递' };
+/** 从短信文本中提取快递单号尾号 */
+function extractTailNumber(text: string): string | null {
+  const patterns = [
+    // "尾号1234"
+    /(?:快递|包裹|运单|单号)?尾号[：:\s]*(\d{3,6})\b/,
+    // "手机尾号1234"
+    /手机尾号[：:\s]*(\d{3,6})\b/,
+    // "后四位1234"
+    /后四位[：:\s]*(\d{4})\b/,
+    // "单号尾号1234"
+    /单号尾号[：:\s]*(\d{3,6})\b/,
+    // "尾数1234"
+    /尾数[：:\s]*(\d{3,6})\b/,
+    // "****1234" 脱敏格式
+    /\*{2,4}(\d{4})\b/,
+    // "运单号后4位"
+    /(?:运单|快递|物流)(?:号)?后\d位[：:\s]*(\d{3,6})\b/,
+    // "您的快递(尾号1234)"
+    /您的(?:快递|包裹).*?尾号[：:\s]*(\d{3,6})/,
+    // "中通快递尾号1234" - 品牌+尾号
+    /(?:顺丰|圆通|中通|申通|韵达|极兔|百世|京东|德邦|邮政|EMS)(?:快递|速运|物流)?.*?尾号[：:\s]*(\d{3,6})/,
+  ];
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m) {
+      const tail = m[1].trim();
+      if (tail.length >= 3 && tail.length <= 6) return tail;
+    }
+  }
+  return null;
 }
+
+// ============================================================
+// parseFreeformText — 口语化文本宽松解析
+// 场景：微信聊天、口述等非标准格式文本
+// ============================================================
+
+const FREEFORM_CODE_PATTERNS: RegExp[] = [
+  /(?:取件码|码|提货码|验证码)[\s：:]*([A-Za-z0-9]{3,8}(?:[\-–—]\d+)*)/,
+  /(?:取件码|码|提货码|验证码)[\s：:]*(\d{2,4}[\-–]\d{2,4})/,
+  /(\d{1,2}[\-–]\d{1,2}[\-–]\d{3,6})/,
+  /(\d{4,8})\s*(?:的|是|，|。|,|\.|\s|$)/,
+  /\b([A-Z]{1,2}\d{4,8})\b/,
+];
+
+const FREEFORM_COURIER_PATTERNS: Array<{ kw: RegExp; code: string; name: string }> = [
+  { kw: /顺丰/, code: 'shunfeng', name: '顺丰速运' },
+  { kw: /圆通/, code: 'yuantong', name: '圆通速递' },
+  { kw: /中通/, code: 'zhongtong', name: '中通快递' },
+  { kw: /申通/, code: 'shentong', name: '申通快递' },
+  { kw: /韵达/, code: 'yunda', name: '韵达快递' },
+  { kw: /极兔|J\s*&?\s*T/, code: 'jitu', name: '极兔速递' },
+  { kw: /京东|JD/, code: 'jingdong', name: '京东快递' },
+  { kw: /邮政|EMS/, code: 'ems', name: '邮政EMS' },
+  { kw: /德邦/, code: 'deppon', name: '德邦快递' },
+  { kw: /百世/, code: 'baishi', name: '百世快递' },
+  { kw: /菜鸟/, code: 'cainiao', name: '菜鸟' },
+  { kw: /丰巢/, code: 'fengchao', name: '丰巢' },
+  { kw: /丹鸟/, code: 'cainiao', name: '丹鸟快递' },
+];
+
+const FREEFORM_STATION_PATTERNS: RegExp[] = [
+  /([一-龥A-Za-z0-9]{1,15}(?:驿站|快递柜|丰巢|菜鸟|兔喜|妈妈驿站|邻里驿站|自提柜|代收点|韵达超市|快递超市|便民服务站|末端服务站|自提点|取件点))/,
+  /(?:在|到|去)([一-龥A-Za-z0-9]{2,20}(?:驿站|快递柜|丰巢|菜鸟|兔喜|妈妈驿站|邻里驿站|自提柜|代收点|取件点))/,
+];
+
+/**
+ * 从任意文本中提取快递取件信息（口语化文本宽松解析）
+ * 返回 Partial ParsedSmsResult，code 不为空即视为成功
+ */
+export function parseFreeformText(text: string): ParsedSmsResult | null {
+  if (!text) return null;
+
+  const cleaned = text.trim().replace(/[【】「」『』""'']/g, '');
+
+  // 1. 提取取件码
+  let code: string | null = null;
+  for (const p of FREEFORM_CODE_PATTERNS) {
+    const m = cleaned.match(p);
+    if (m) {
+      const c = m[1].trim().toUpperCase().replace(/[–—]/g, '-');
+      if (c.length >= 3 && c.length <= 20 && !/^\d{10,}$/.test(c)) {
+        code = c;
+        break;
+      }
+    }
+  }
+  if (!code) return null;
+
+  // 2. 提取快递公司
+  let company = 'unknown';
+  let companyName = '快递';
+  for (const { kw, code: c, name } of FREEFORM_COURIER_PATTERNS) {
+    if (kw.test(cleaned)) {
+      company = c;
+      companyName = name;
+      break;
+    }
+  }
+
+  // 3. 提取站点名
+  let stationName: string | null = null;
+  for (const p of FREEFORM_STATION_PATTERNS) {
+    const m = cleaned.match(p);
+    if (m) {
+      stationName = m[1].trim();
+      break;
+    }
+  }
+
+  // 4. 尝试提取地址
+  let address = '';
+  const addrMatch = cleaned.match(
+    /(?:地址|在|到|去)[：:\s]*([一-龥A-Za-z0-9]{2,40}(?:路|街|道|巷|号|小区|大厦|广场|单元|栋|楼|层|室|门))/,
+  );
+  if (addrMatch) address = addrMatch[1].trim();
+
+  // 5. 尝试提取电话
+  let stationPhone: string | null = null;
+  const phoneMatch = cleaned.match(/(?:电话|联系)[：:\s]*(1[3-9]\d{9})/);
+  if (phoneMatch) stationPhone = phoneMatch[1];
+
+  return {
+    code,
+    company: company as CarrierCode,
+    companyName,
+    address,
+    expiresAt: null,
+    stationName,
+    stationPhone,
+  };
+}
+
+// guessCarrierByTrackingNumber 提取到 carrier-utils.ts，此处重导出保持向后兼容
+export { guessCarrierByTrackingNumber } from './carrier-utils';

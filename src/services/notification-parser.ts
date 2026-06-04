@@ -10,7 +10,7 @@ import {
 } from '../patterns/notification-patterns';
 import type { NotificationRule } from '../patterns/notification-patterns';
 import type { ParsedNotificationResult } from '../models';
-import { guessCarrierByTrackingNumber } from './sms-parser';
+import { guessCarrierByTrackingNumber } from './carrier-utils';
 import { normalizeText, isValidAddress } from '../utils/formatters';
 
 /**

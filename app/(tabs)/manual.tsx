@@ -8,21 +8,23 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import { getMembers, addMember, removeMember } from '../../src/services/family-service';
-import type { FamilyMember } from '../../src/models';
-import { parseSms, guessCarrierByTrackingNumber } from '../../src/services/sms-parser';
+import { parseSms, guessCarrierByTrackingNumber, parseFreeformText } from '../../src/services/sms-parser';
 import { parseOcrText, type OcrPackageInfo } from '../../src/services/ocr-parser';
+import { preprocessForOcr } from '../../src/services/ocr-preprocessor';
 import {
-  insertPackage, getPackageByTrackingNumber, markAsPickedUp, updatePickupCode,
+  insertPackage, getPackageByTrackingNumber, getPackageByPickupCode,
+  findMatchingPackage, findPackageByTailNumber, markAsPickedUp, updatePickupCode,
 } from '../../src/database/dao';
 import type { Package } from '../../src/models';
 import { generateId, normalizeText } from '../../src/utils/formatters';
+import { createPackage } from '../../src/utils/package-factory';
 import { refreshWidget } from '../../src/services/widget-refresh';
 import { canAddPackage, FREE_PACKAGE_LIMIT } from '../../src/services/settings-store';
 import {
   FontSize, Spacing, BorderRadius, Shadow, useColors, createGlobalStyles,
 } from '../../src/constants/theme';
 import type { ColorScheme } from '../../src/constants/theme';
+import { ErrorBoundary } from '../../src/components/ErrorBoundary';
 
 // OCR — static imports with fallback
 let launchGallery: any = null;
@@ -70,13 +72,6 @@ export default function ManualScreen() {
   } | null>(null);
   // 暂存解析结果，点保存时写入数据库
   const [pendingPkg, setPendingPkg] = useState<Package | null>(null);
-  // 家庭管理
-  const [family, setFamily] = useState<FamilyMember[]>([]);
-  const [famName, setFamName] = useState('');
-  const [showFamInput, setShowFamInput] = useState(false);
-  const loadFamily = useCallback(async () => { setFamily(await getMembers()); }, []);
-  useEffect(() => { loadFamily(); }, [loadFamily]);
-
   // 检查是否有转发导入的短信文本
   useEffect(() => {
     try {
@@ -96,18 +91,25 @@ export default function ManualScreen() {
     setPendingPkg(null);
     try {
       if (mode === 'sms') {
-        // 解析短信
-        const result = parseSms(text);
+        // 解析短信 → 标准正则 → 口语化兜底
+        let result = parseSms(text);
         if (!result) {
-          Alert.alert('未识别', '未检测到取件码信息，请检查短信内容');
+          result = parseFreeformText(text);
+        }
+
+        if (!result) {
+          Alert.alert('未识别', '未检测到取件码信息，请检查短信内容\n\n提示：也可尝试用「截图识别」功能');
           return;
         }
+
+        const sourceLabel = parseSms(text) ? 'sms' : 'freeform';
         setPreview({
           type: 'sms',
           title: `取件码: ${result.code}`,
           detail: [
             `快递公司: ${result.companyName}`,
             result.address ? `取件地址: ${result.address}` : '',
+            result.stationName ? `站点: ${result.stationName}` : '',
           ].filter(Boolean).join('\n'),
         });
         // 暂存包裹数据
@@ -188,13 +190,21 @@ export default function ManualScreen() {
   const [ocrProgress, setOcrProgress] = useState('');
   const [viewingRawIdx, setViewingRawIdx] = useState<number | null>(null);
 
-  const processImages = useCallback(async (uris: string[]) => {
+  const processImages = useCallback(async (uris: string[], source: 'screenshot' | 'camera' | 'gallery' = 'gallery') => {
     const items: OcrResultItem[] = [];
     const batch = uris.slice(0, 9);
     for (let i = 0; i < batch.length; i++) {
+      setOcrProgress(`正在预处理 ${i + 1}/${batch.length}...`);
+      // 预处理：自动裁剪 + 尺寸优化
+      const optimizedUri = await preprocessForOcr(batch[i], source);
+
       setOcrProgress(`正在识别 ${i + 1}/${batch.length}...`);
       let text = '';
       if (recognizeImage) {
+        try { text = (await recognizeImage(optimizedUri)) || ''; } catch {}
+      }
+      // 如果优化后的图识别为空，用原图重试
+      if (!text && optimizedUri !== batch[i]) {
         try { text = (await recognizeImage(batch[i])) || ''; } catch {}
       }
       const info = text ? parseOcrText(text) : null;
@@ -203,7 +213,7 @@ export default function ManualScreen() {
     setOcrProgress('');
     setOcrResults(items);
     if (items.every(i => !i.info)) {
-      Alert.alert('未识别', '所选图片均未提取到快递单号');
+      Alert.alert('未识别', '所选图片均未提取到取件信息，请确认图片包含快递通知截图');
     }
   }, []);
 
@@ -216,9 +226,10 @@ export default function ManualScreen() {
     try {
       const uris: string[] = await launchGallery();
       if (!uris || uris.length === 0) { setLoading(false); return; }
-      await processImages(uris);
-    } catch (e: any) {
-      Alert.alert('操作失败', e.message || '请授予相册权限后重试');
+      await processImages(uris, 'gallery');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '未知错误';
+      Alert.alert('操作失败', msg || '请授予相册权限后重试');
     }
     setLoading(false);
   }, [processImages]);
@@ -238,10 +249,11 @@ export default function ManualScreen() {
       });
       if (!result.canceled && result.assets?.length > 0) {
         const uris = result.assets.map(a => a.uri);
-        await processImages(uris);
+        await processImages(uris, 'camera');
       }
-    } catch (e: any) {
-      Alert.alert('拍照失败', e.message || '请授予相机权限后重试');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '未知错误';
+      Alert.alert('拍照失败', msg || '请授予相机权限后重试');
     }
     setLoading(false);
   }, [processImages]);
@@ -267,53 +279,89 @@ export default function ManualScreen() {
     }
     setLoading(true);
     let count = 0;
+    let skipped = 0;
+    const skippedCodes: string[] = [];
     for (const { info } of selected) {
       if (!info) continue;
-      const existing = getPackageByTrackingNumber(info.trackingNumber);
+
+      // === 去重：按取件码 ===
+      if (info.pickupCode) {
+        const dupByCode = getPackageByPickupCode(info.pickupCode);
+        if (dupByCode) {
+          // 已有相同取件码 → 确保状态是 stored（可能在运输中/已签收标签下找不到）
+          if (dupByCode.currentStatus !== 'stored' && dupByCode.currentStatus !== 'picked_up') {
+            updatePickupCode(dupByCode.id, info.pickupCode, info.pickupAddress);
+          }
+          skipped++;
+          skippedCodes.push(`${info.pickupCode}（${info.carrierName}）`);
+          continue;
+        }
+      }
+      // === 去重：按快递单号 ===
+      let existing: Package | null = null;
+      if (info.trackingNumber) {
+        existing = getPackageByTrackingNumber(info.trackingNumber);
+      }
+      // === 去重：尾号匹配（只识别到尾号时匹配已有包裹） ===
+      if (!existing && info.tailNumber) {
+        existing = findPackageByTailNumber(info.tailNumber, info.carrier !== 'unknown' ? info.carrier : undefined);
+      }
+      // === 去重：模糊匹配 ===
+      if (!existing && info.carrier !== 'unknown' && info.pickupAddress) {
+        existing = findMatchingPackage(info.carrier, info.pickupAddress, info.trackingNumber || null);
+      }
+
       if (existing) {
-        // 已有记录：更新取件状态 + 取件码
+        // 已有记录：更新状态 + 取件码
+        if (info.pickupCode && !existing.pickupCode) {
+          updatePickupCode(existing.id, info.pickupCode, info.pickupAddress);
+        } else if (existing.currentStatus !== 'stored' && existing.currentStatus !== 'picked_up') {
+          // 状态修正：OCR确认有取件码 → 改为待取件
+          if (info.pickupCode || info.pickupAddress) {
+            updatePickupCode(existing.id, existing.pickupCode || info.pickupCode || '',
+              existing.pickupAddress || info.pickupAddress);
+          }
+        }
         if (info.isPickedUp && existing.currentStatus !== 'picked_up') {
           markAsPickedUp(existing.id);
         }
-        if (info.pickupCode && !existing.pickupCode) {
-          updatePickupCode(existing.id, info.pickupCode, info.pickupAddress);
+        // 补充缺失的营业时间
+        if (info.businessHours && !existing.businessHours) {
+          updatePickupCode(existing.id, existing.pickupCode || '',
+            existing.pickupAddress || '', existing.pickupPointName || '',
+            existing.pickupPointPhone || '', info.businessHours);
         }
+        skipped++;
+        skippedCodes.push(`${existing.pickupCode || existing.trackingNumber}（${existing.carrierName}）`);
         continue;
       }
-      const now = Date.now();
-      const pkgId = generateId();
-      insertPackage({
-        id: pkgId,
-        trackingNumber: info.trackingNumber,
+      // 追踪号：优先用完整单号，否则用尾号
+      const trackingNumber = info.trackingNumber || (info.tailNumber ? `尾号${info.tailNumber}` : '');
+      insertPackage(createPackage({
+        trackingNumber,
         carrier: info.carrier,
         carrierName: info.carrierName,
         orderSource: info.orderSource,
         productName: info.productName,
-        pickupCode: info.pickupCode || null,
-        pickupAddress: info.pickupAddress || null,
-        pickupPointName: null,
-        pickupPointPhone: null,
-        businessHours: null,
-        notes: null,
-        currentStatus: info.isPickedUp ? 'picked_up' : 'shipped',
-        statusUpdatedAt: now,
+        pickupCode: info.pickupCode,
+        pickupAddress: info.pickupAddress,
+        pickupPointName: info.stationName || undefined,
+        pickupPointPhone: info.stationPhone || undefined,
+        businessHours: info.businessHours || undefined,
+        currentStatus: info.isPickedUp ? 'picked_up' : (info.pickupCode ? 'stored' : 'shipped'),
         source: 'manual',
-        createdAt: now,
-        pickedUpAt: info.isPickedUp ? now : 0,
-        expiresAt: 0,
-        pinned: false,
-        smsRawText: null,
+        pickedUpAt: info.isPickedUp ? Date.now() : 0,
         screenshotPaths: JSON.stringify(selected.map(s => s.uri)),
-        assignedTo: null,
-        assignedToName: null,
-        pushedBy: null,
-        pushStatus: null,
-      });
+      }));
       count++;
     }
-    Alert.alert('导入完成',
-      `成功添加 ${count} 个包裹\n已存在则自动标记取件`
-    );
+    const msgParts = [`成功添加 ${count} 个包裹`];
+    if (skipped > 0) {
+      msgParts.push(`${skipped} 个已存在：`);
+      msgParts.push(skippedCodes.join('、'));
+      msgParts.push('可在「待取件」或搜索找到');
+    }
+    Alert.alert('导入完成', msgParts.join('\n'));
     setLoading(false);
     setOcrResults([]);
     refreshWidget();
@@ -322,6 +370,48 @@ export default function ManualScreen() {
 
   const handleSave = useCallback(() => {
     if (!pendingPkg) return;
+
+    // === 去重：按取件码 + 快递单号 ===
+    if (pendingPkg.pickupCode) {
+      const dupByCode = getPackageByPickupCode(pendingPkg.pickupCode);
+      if (dupByCode) {
+        Alert.alert('已存在', `取件码 ${pendingPkg.pickupCode} 已存在，无需重复添加`);
+        return;
+      }
+    }
+    if (pendingPkg.trackingNumber) {
+      const dupByTn = getPackageByTrackingNumber(pendingPkg.trackingNumber);
+      if (dupByTn) {
+        // 已有记录但缺取件码 → 补充取件码
+        if (pendingPkg.pickupCode && !dupByTn.pickupCode) {
+          updatePickupCode(dupByTn.id, pendingPkg.pickupCode, pendingPkg.pickupAddress,
+            pendingPkg.pickupPointName, pendingPkg.pickupPointPhone, pendingPkg.businessHours);
+          Alert.alert('已更新', `已为快递单号 ${pendingPkg.trackingNumber} 补充取件码`);
+          refreshWidget();
+          router.navigate('/(tabs)');
+          return;
+        }
+        Alert.alert('已存在', `快递单号 ${pendingPkg.trackingNumber} 已存在`);
+        return;
+      }
+    }
+    // 模糊匹配：同快递公司 + 同地址
+    if (pendingPkg.carrier && pendingPkg.pickupAddress) {
+      const matched = findMatchingPackage(pendingPkg.carrier, pendingPkg.pickupAddress, pendingPkg.trackingNumber);
+      if (matched) {
+        if (pendingPkg.pickupCode && !matched.pickupCode) {
+          updatePickupCode(matched.id, pendingPkg.pickupCode, pendingPkg.pickupAddress,
+            pendingPkg.pickupPointName, pendingPkg.pickupPointPhone, pendingPkg.businessHours);
+          Alert.alert('已更新', '已为已有包裹补充取件码');
+        } else {
+          Alert.alert('已存在', '该地址已有相似包裹，请勿重复添加');
+        }
+        refreshWidget();
+        router.navigate('/(tabs)');
+        return;
+      }
+    }
+
     if (!canAddPackage(1)) {
       Alert.alert(
         '已达免费上限',
@@ -338,6 +428,7 @@ export default function ManualScreen() {
   }, [pendingPkg, router]);
 
   return (
+    <ErrorBoundary>
     <KeyboardAvoidingView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         {/* 顶部导航栏 */}
@@ -476,6 +567,32 @@ export default function ManualScreen() {
                     ) : null}
                   </View>
                 ))}
+
+                {/* 底部操作栏：全选/反选 + 保存 */}
+                {ocrResults.length > 0 ? (
+                  <View style={styles.ocrBottomBar}>
+                    <Pressable
+                      style={styles.ocrSelectAllBtn}
+                      onPress={() => {
+                        const hasUnselected = ocrResults.some(r => !r.selected);
+                        setOcrResults(prev => prev.map(r => ({ ...r, selected: hasUnselected })));
+                      }}
+                    >
+                      <Text style={styles.ocrSelectAllText}>
+                        {ocrResults.every(r => r.selected) ? '☐ 取消全选' : '☑ 全选'}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.ocrBottomSaveBtn, loading && { opacity: 0.5 }]}
+                      onPress={handleSaveOcrResults}
+                      disabled={loading}
+                    >
+                      <Text style={styles.ocrBottomSaveText}>
+                        {loading ? '保存中...' : `保存选中 (${ocrResults.filter(r => r.selected && r.info).length})`}
+                      </Text>
+                    </Pressable>
+                  </View>
+                ) : null}
               </View>
             )}
           </View>
@@ -535,34 +652,9 @@ export default function ManualScreen() {
         ) : null}
           </>
         )}
-        {/* ======== 家庭共享 ======== */}
-        <View style={[styles.famSection, { marginTop: Spacing.xl }]}>
-          <Text style={styles.famTitle}>👥 成员共享</Text>
-          <Text style={styles.famDesc}>添加成员后，在包裹详情可分配取件</Text>
-          <View style={styles.famRow}>
-            {family.map(m => (
-              <View key={m.id} style={[styles.famTag, { backgroundColor: m.color + '22', borderColor: m.color }]}>
-                <Text style={[styles.famTagText, { color: m.color }]}>{m.name}</Text>
-                <Pressable onPress={async () => { await removeMember(m.id); loadFamily(); }} hitSlop={8}>
-                  <Text style={styles.famTagDel}>✕</Text>
-                </Pressable>
-              </View>
-            ))}
-            <Pressable style={styles.famAddTag} onPress={() => setShowFamInput(!showFamInput)}>
-              <Text style={styles.famAddText}>+ 添加</Text>
-            </Pressable>
-          </View>
-          {showFamInput && (
-            <View style={styles.famInputRow}>
-              <TextInput style={styles.famInput} value={famName} onChangeText={setFamName} placeholder="姓名（如：小明）" placeholderTextColor={colors.textPlaceholder} onSubmitEditing={async () => { if (famName.trim()) { await addMember(famName.trim()); setFamName(''); setShowFamInput(false); loadFamily(); } }} />
-              <Pressable style={[styles.famConfirmBtn, !famName.trim() && { opacity: 0.4 }]} onPress={async () => { if (famName.trim()) { await addMember(famName.trim()); setFamName(''); setShowFamInput(false); loadFamily(); } }} disabled={!famName.trim()}>
-                <Text style={styles.famConfirmText}>确定</Text>
-              </Pressable>
-            </View>
-          )}
-        </View>
       </ScrollView>
     </KeyboardAvoidingView>
+    </ErrorBoundary>
   );
 }
 
@@ -798,6 +890,43 @@ const createStyles = (colors: ColorScheme) => StyleSheet.create({
     fontSize: 24,
     paddingLeft: Spacing.sm,
   },
+  // ---- OCR 底部操作栏 ----
+  ocrBottomBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: Spacing.md,
+    paddingTop: Spacing.md,
+    borderTopWidth: 0.5,
+    borderTopColor: colors.separator,
+    gap: Spacing.sm,
+  },
+  ocrSelectAllBtn: {
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.md,
+    backgroundColor: colors.secondarySurface,
+    borderWidth: 1,
+    borderColor: colors.separator,
+  },
+  ocrSelectAllText: {
+    fontSize: FontSize.subhead,
+    color: colors.textSecondary,
+    fontWeight: '600',
+  },
+  ocrBottomSaveBtn: {
+    flex: 1,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.md,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ocrBottomSaveText: {
+    fontSize: FontSize.subhead,
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
   // ---- 调试测试按钮 ----
   testBtn: {
     alignSelf: 'center',
@@ -812,17 +941,4 @@ const createStyles = (colors: ColorScheme) => StyleSheet.create({
     fontSize: FontSize.caption1,
     color: colors.primary,
   },
-  famSection: { padding: Spacing.lg, backgroundColor: colors.surface, borderRadius: BorderRadius.lg, marginHorizontal: Spacing.lg, ...Shadow.card },
-  famTitle: { fontSize: FontSize.subhead, fontWeight: '700', color: colors.textPrimary, marginBottom: 4 },
-  famDesc: { fontSize: FontSize.caption1, color: colors.textSecondary, marginBottom: Spacing.md },
-  famRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  famTag: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: BorderRadius.pill, borderWidth: 1 },
-  famTagText: { fontSize: FontSize.footnote, fontWeight: '600', marginRight: 6 },
-  famTagDel: { fontSize: FontSize.caption1, color: '#999' },
-  famAddTag: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: BorderRadius.pill, borderWidth: 1, borderColor: colors.primary, borderStyle: 'dashed' },
-  famAddText: { fontSize: FontSize.footnote, color: colors.primary, fontWeight: '600' },
-  famInputRow: { flexDirection: 'row', gap: 8, marginTop: Spacing.md },
-  famInput: { flex: 1, backgroundColor: colors.secondarySurface, borderRadius: BorderRadius.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, fontSize: FontSize.subhead, color: colors.textPrimary },
-  famConfirmBtn: { backgroundColor: colors.primary, borderRadius: BorderRadius.md, paddingHorizontal: Spacing.lg, justifyContent: 'center' },
-  famConfirmText: { color: '#FFFFFF', fontSize: FontSize.subhead, fontWeight: '600' },
 });

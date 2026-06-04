@@ -5,6 +5,7 @@ import { useMemo } from 'react';
 import { useWindowDimensions } from 'react-native';
 import { scaleSize, scaleFont, scaleModerate } from '../utils/scaling';
 import { Spacing, FontSize, BorderRadius } from '../constants/theme';
+import { getLargeFontMode } from '../services/settings-store';
 
 export interface ResponsiveConstants {
   scaledSpacing: typeof Spacing;
@@ -24,28 +25,29 @@ export function useResponsive(): ResponsiveConstants {
 
   return useMemo(() => {
     const w = Math.min(width, height); // 取短边（竖屏宽度）
+    const largeMult = getLargeFontMode() ? 1.3 : 1.0;
 
     return {
       scaledSpacing: {
-        xs: scaleSize(Spacing.xs),
-        sm: scaleSize(Spacing.sm),
-        md: scaleSize(Spacing.md),
-        lg: scaleSize(Spacing.lg),
-        xl: scaleSize(Spacing.xl),
-        xxl: scaleSize(Spacing.xxl),
+        xs: scaleSize(Spacing.xs * largeMult),
+        sm: scaleSize(Spacing.sm * largeMult),
+        md: scaleSize(Spacing.md * largeMult),
+        lg: scaleSize(Spacing.lg * largeMult),
+        xl: scaleSize(Spacing.xl * largeMult),
+        xxl: scaleSize(Spacing.xxl * largeMult),
       },
       scaledFontSize: {
-        caption: scaleFont(FontSize.caption),
-        caption1: scaleFont(FontSize.caption1),
-        footnote: scaleFont(FontSize.footnote),
-        subhead: scaleFont(FontSize.subhead),
-        body: scaleFont(FontSize.body),
-        headline: scaleFont(FontSize.headline),
-        title3: scaleFont(FontSize.title3),
-        title2: scaleFont(FontSize.title2),
-        title1: scaleFont(FontSize.title1),
-        pickupCode: scaleFont(FontSize.pickupCode),
-        largeTitle: scaleFont(FontSize.largeTitle),
+        caption: scaleFont(FontSize.caption * largeMult),
+        caption1: scaleFont(FontSize.caption1 * largeMult),
+        footnote: scaleFont(FontSize.footnote * largeMult),
+        subhead: scaleFont(FontSize.subhead * largeMult),
+        body: scaleFont(FontSize.body * largeMult),
+        headline: scaleFont(FontSize.headline * largeMult),
+        title3: scaleFont(FontSize.title3 * largeMult),
+        title2: scaleFont(FontSize.title2 * largeMult),
+        title1: scaleFont(FontSize.title1 * largeMult),
+        pickupCode: scaleFont(FontSize.pickupCode * largeMult),
+        largeTitle: scaleFont(FontSize.largeTitle * largeMult),
       },
       scaledBorderRadius: {
         sm: scaleSize(BorderRadius.sm),

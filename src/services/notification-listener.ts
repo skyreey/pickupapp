@@ -1,10 +1,9 @@
-﻿// ============================================================
+// ============================================================
 // 通知监听服务
 //
 // 连接原生 NotificationListenerService → 解析推送 → 建包裹
 // ============================================================
 import { Platform, AppState } from 'react-native';
-import { LRUSet } from '../utils/lru';
 import {
   hasPermission,
   startListening,
@@ -18,9 +17,30 @@ import {
   insertPackage,
   getPackageByTrackingNumber,
 } from '../database/dao';
-import type { Package } from '../models';
-import { generateId } from '../utils/formatters';
-import { canAddPackage } from './settings-store';
+import { createPackage } from '../utils/package-factory';
+import { canAddPackage, FREE_PACKAGE_LIMIT, getIsPro } from './settings-store';
+import { createLogger } from '../utils/logger';
+const Notifications = require('expo-notifications');
+
+const log = createLogger('NotificationListener');
+
+// 限流通知：每小时最多弹一次
+let _lastLimitNotifyTs = 0;
+function _notifyLimitReached(): void {
+  if (getIsPro()) return;
+  const now = Date.now();
+  if (now - _lastLimitNotifyTs < 60 * 60 * 1000) return;
+  _lastLimitNotifyTs = now;
+  log.info('免费版包裹超限，发送通知提醒');
+  Notifications.scheduleNotificationAsync({
+    content: {
+      title: '包裹超限',
+      body: `免费版最多记录 ${FREE_PACKAGE_LIMIT} 个包裹，新的取件码未录入。\n升级 Pro 解锁无限包裹。`,
+      data: { type: 'limit_reached' },
+    },
+    trigger: null,
+  }).catch(() => {});
+}
 
 let listenerActive = false;
 let unsubscribe: (() => void) | null = null;
@@ -63,8 +83,8 @@ async function scanActiveNotifications(): Promise<void> {
     for (const data of notifications) {
       handleIncomingNotification(data);
     }
-  } catch {
-    // 静默失败，不影响正常流程
+  } catch (e) {
+    log.warn('扫描活跃通知失败', { error: String(e) });
   }
 }
 
@@ -92,7 +112,8 @@ function stopNotificationListening(): void {
 // ============================================================
 // 通知处理逻辑
 // ============================================================
-const processedHashes = new LRUSet(200);
+
+const processedHashes = new Set<string>();
 
 function handleIncomingNotification(data: NotificationData): void {
   const { packageName, title, text, timestamp } = data;
@@ -105,10 +126,10 @@ function handleIncomingNotification(data: NotificationData): void {
   if (processedHashes.has(hash)) return;
   processedHashes.add(hash);
 
-
-
-
-
+  if (processedHashes.size > 200) {
+    const arr = [...processedHashes];
+    processedHashes.clear();
+    arr.slice(-100).forEach(h => processedHashes.add(h));
   }
 
   // 解析通知内容（商品名 + 快递单号 + 快递公司）
@@ -120,35 +141,19 @@ function handleIncomingNotification(data: NotificationData): void {
   if (existing) return;
 
   // 新建包裹
-  if (!canAddPackage(1)) return; // 免费版超限，静默跳过
-  const now = Date.now();
-  const pkgId = generateId();
-  const pkg: Package = {
-    id: pkgId,
+  if (!canAddPackage(1)) { _notifyLimitReached(); return; } // 免费版超限
+  const pkg = createPackage({
     trackingNumber: result.trackingNumber,
     carrier: result.carrier,
     carrierName: result.carrierName,
     orderSource: result.orderSource,
     productName: result.productName,
-    pickupCode: null,
-    pickupAddress: result.address || null,
-    pickupPointName: result.stationName || null,
-    pickupPointPhone: result.phone || null,
-    businessHours: null,
-    notes: null,
+    pickupAddress: result.address,
+    pickupPointName: result.stationName,
+    pickupPointPhone: result.phone,
     currentStatus: 'shipped',
-    statusUpdatedAt: now,
     source: 'notification',
-    createdAt: timestamp > 0 ? timestamp : now,
-    pickedUpAt: 0,
-    expiresAt: 0,
-    pinned: false,
-    smsRawText: null,
-    screenshotPaths: null,
-    assignedTo: null,
-    assignedToName: null,
-    pushedBy: null,
-    pushStatus: null,
-  };
+    createdAt: timestamp > 0 ? timestamp : undefined,
+  });
   insertPackage(pkg);
 }

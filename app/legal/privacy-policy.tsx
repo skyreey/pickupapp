@@ -26,7 +26,10 @@ export default function PrivacyPolicyScreen() {
             <Text style={styles.bold}>通知监听：</Text>本应用会监听淘宝、京东、拼多多等购物App的推送通知，从中提取快递物流信息。通知内容同样仅在本地处理，不会上传。
           </Text>
           <Text style={styles.body}>
-            <Text style={styles.bold}>我们不收集的信息：</Text>本应用不注册账号、不收集手机号、不收集位置信息、不获取通讯录、不获取相册（除非您主动使用OCR功能选择截图）。
+            <Text style={styles.bold}>Pro会员服务：</Text>开通Pro会员时，您可选填手机号用于换机恢复会员权益。手机号经SHA-256哈希处理后传输至服务器，服务器不存储原始手机号。
+          </Text>
+          <Text style={styles.body}>
+            <Text style={styles.bold}>我们不收集的信息：</Text>本应用不注册账号、不收集位置信息、不获取通讯录、不获取相册（除非您主动使用OCR功能选择截图）。
           </Text>
         </Section>
 

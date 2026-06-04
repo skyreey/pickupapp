@@ -90,7 +90,7 @@ export function PackageCard({ pkg, onPress, onLongPress, selected, onMarkPickedU
             ) : pkg.assignedToName ? (
               <Text style={[styles.pinBadge, { color: '#FF9500' }]}>👤 {pkg.assignedToName}</Text>
             ) : null}
-            {pkg.pinned ? <Text style={styles.pinBadge}>📌</Text> : null}
+            {pkg.pinned ? <Text style={styles.pinBadge}>📦</Text> : null}
           </View>
         ) : <View />}
         {onShare ? (
@@ -106,7 +106,13 @@ export function PackageCard({ pkg, onPress, onLongPress, selected, onMarkPickedU
           <Text style={styles.courierText}>{pkg.carrierName}</Text>
         ) : null}
         {displayTn ? (
-          <Pressable onPress={handleCopyTn} style={styles.tnCopyBtn} hitSlop={8}>
+          <Pressable
+            onPress={handleCopyTn}
+            style={styles.tnCopyBtn}
+            hitSlop={8}
+            accessibilityLabel={`快递单号 ${displayTn}，双击复制`}
+            accessibilityRole="button"
+          >
             <Text style={styles.tnCopyText} numberOfLines={1}>{displayTn}</Text>
             <Text style={styles.tnCopyIcon}>📋</Text>
           </Pressable>
@@ -129,7 +135,12 @@ export function PackageCard({ pkg, onPress, onLongPress, selected, onMarkPickedU
 
       {/* 取件码高亮区 — 点击复制 */}
       {pkg.pickupCode ? (
-        <Pressable style={styles.codeContainer} onPress={handleCopyCode}>
+        <Pressable
+          style={styles.codeContainer}
+          onPress={handleCopyCode}
+          accessibilityLabel={`取件码 ${pkg.pickupCode}，双击复制`}
+          accessibilityRole="button"
+        >
           <Text style={styles.codeLabel}>取件码（点击复制）</Text>
           <Text style={styles.codeValue}>{pkg.pickupCode}</Text>
         </Pressable>
@@ -142,6 +153,8 @@ export function PackageCard({ pkg, onPress, onLongPress, selected, onMarkPickedU
           <Pressable
             style={styles.phoneBtn}
             onPress={() => callPhoneNumber(pkg.pickupPointPhone!)}
+            accessibilityLabel={`拨打快递点电话 ${pkg.pickupPointPhone}`}
+            accessibilityRole="button"
           >
             <Text style={styles.phoneBtnText}>联系电话</Text>
           </Pressable>
@@ -159,6 +172,8 @@ export function PackageCard({ pkg, onPress, onLongPress, selected, onMarkPickedU
           <Pressable
             style={styles.navBtn}
             onPress={() => navigateToAddress(pkg.pickupAddress!, pkg.pickupPointName || pkg.carrierName)}
+            accessibilityLabel={`导航到 ${pkg.pickupAddress}`}
+            accessibilityRole="button"
           >
             <Text style={styles.navBtnText}>🧭去这里</Text>
           </Pressable>
@@ -171,6 +186,7 @@ export function PackageCard({ pkg, onPress, onLongPress, selected, onMarkPickedU
           <TouchableNativeFeedback
             onPress={() => onMarkPickedUp?.()}
             background={TouchableNativeFeedback.Ripple('#ffffff44', false)}
+            accessibilityLabel={`标记包裹 ${pkg.productName || pkg.carrierName} 为已取件`}
           >
             <View style={styles.pickupBtn}>
               <Text style={styles.pickupBtnText}>✓ 标记已取件</Text>
@@ -180,6 +196,7 @@ export function PackageCard({ pkg, onPress, onLongPress, selected, onMarkPickedU
           <TouchableNativeFeedback
             onPress={() => onUndoPickup?.()}
             background={TouchableNativeFeedback.Ripple('#ffffff44', false)}
+            accessibilityLabel={`撤销取件 ${pkg.productName || pkg.carrierName}`}
           >
             <View style={styles.undoBtn}>
               <Text style={styles.undoBtnText}>↩ 撤销取件</Text>

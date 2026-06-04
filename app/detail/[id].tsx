@@ -11,7 +11,8 @@ import { updatePackageInfo, markAsPickedUp, togglePin, assignPackage } from '../
 import { getMembers, findMember } from '../../src/services/family-service';
 import type { FamilyMember } from '../../src/models';
 import { initDatabase } from '../../src/database';
-import { navigateToAddress, callPhoneNumber } from '../../src/utils/navigation';
+import { callPhoneNumber } from '../../src/utils/navigation';
+import { getTimeLimitStatus, isTimeSensitiveStation, parseBusinessHoursClosing } from '../../src/utils/formatters';
 import {
   Shadow, useColors,
   CourierIcons, CourierColors, PlatformIcons,
@@ -94,10 +95,44 @@ export default function DetailScreen() {
         <PickupCodeBanner code={pkg.pickupCode} companyName={pkg.carrierName} />
       ) : null}
 
+      {/* 时效倒计时（仅快递柜类站点） */}
+      {isTimeSensitiveStation(pkg.pickupPointName) && pkg.expiresAt > 0 ? (
+        (() => {
+          const status = getTimeLimitStatus(pkg.expiresAt);
+          if (!status) return null;
+          const barColors = { green: '#34C759', orange: '#FF9500', red: '#FF3B30', gray: '#8E8E93' };
+          const bgColors = { green: '#E8F5E9', orange: '#FFF3E0', red: '#FFEBEE', gray: '#F2F2F7' };
+          const barColor = barColors[status.color];
+          const bgColor = bgColors[status.color];
+
+          return (
+            <View style={[styles.timeLimitBar, { backgroundColor: bgColor, borderColor: barColor }]}>
+              <View style={styles.timeLimitHeader}>
+                <Text style={styles.timeLimitIcon}>⏱</Text>
+                <Text style={[styles.timeLimitLabel, { color: barColor }]}>
+                  {status.expired ? '已超时，请联系快递员重新投放' : status.label}
+                </Text>
+              </View>
+              <View style={styles.timeLimitTrack}>
+                <View style={[styles.timeLimitFill, { width: `${status.progress * 100}%`, backgroundColor: barColor }]} />
+              </View>
+            </View>
+          );
+        })()
+      ) : null}
+
       {/* 取件点信息卡片 */}
       {pkg.pickupPointName || pkg.pickupPointPhone || pkg.pickupAddress ? (
         <View style={styles.stationCard}>
           <Text style={styles.stationSectionTitle}>取件点</Text>
+
+          {/* 快递公司 */}
+          {pkg.carrierName && !['菜鸟驿站', '菜鸟', '丰巢', '快递', '其他', 'unknown'].includes(pkg.carrierName) ? (
+            <View style={styles.stationRow}>
+              <Text style={styles.stationIcon}>🚚</Text>
+              <Text style={styles.stationName}>{pkg.carrierName}</Text>
+            </View>
+          ) : null}
 
           {pkg.pickupPointName ? (
             <View style={styles.stationRow}>
@@ -119,22 +154,73 @@ export default function DetailScreen() {
             </View>
           ) : null}
 
+          {/* 营业时间状态 */}
+          {pkg.businessHours ? (() => {
+            const hours = (pkg.businessHours || '').trim();
+            const is24h = /24\s*小时|全天|24h/i.test(hours);
+            const closing = parseBusinessHoursClosing(pkg.businessHours);
+            if (is24h) {
+              return (
+                <View style={styles.stationRow}>
+                  <Text style={styles.stationIcon}>⏰</Text>
+                  <Text style={[styles.businessHoursText, { color: '#34C759' }]}>24小时营业</Text>
+                </View>
+              );
+            }
+            if (closing) {
+              const [h, m] = closing.split(':').map(Number);
+              const closeMin = h * 60 + m;
+              const now = new Date();
+              const nowMin = now.getHours() * 60 + now.getMinutes();
+              const isClosed = nowMin >= closeMin;
+              const minsLeft = closeMin - nowMin;
+              const hLeft = Math.floor(minsLeft / 60);
+              const mLeft = minsLeft % 60;
+
+              if (isClosed) {
+                return (
+                  <View style={styles.stationRow}>
+                    <Text style={styles.stationIcon}>⏰</Text>
+                    <Text style={[styles.businessHoursText, { color: colors.error }]}>
+                      已关门 · 明日{closing}开门
+                    </Text>
+                  </View>
+                );
+              }
+              const timeLabel = hLeft > 0
+                ? `距关门还有${hLeft}小时${mLeft > 0 ? `${mLeft}分钟` : ''}`
+                : `距关门还有${mLeft}分钟`;
+              return (
+                <View style={styles.stationRow}>
+                  <Text style={styles.stationIcon}>⏰</Text>
+                  <Text style={[styles.businessHoursText, { color: '#FF9500' }]}>
+                    营业中 · {hours} · {timeLabel}
+                  </Text>
+                </View>
+              );
+            }
+            return (
+              <View style={styles.stationRow}>
+                <Text style={styles.stationIcon}>⏰</Text>
+                <Text style={[styles.businessHoursText, { color: colors.textSecondary }]}>
+                  营业时间：{hours}
+                </Text>
+              </View>
+            );
+          })() : null}
+
           {pkg.pickupAddress ? (
             <View style={styles.stationRow}>
               <Text style={styles.stationIcon}>📍</Text>
-              <Text style={styles.stationAddress}>{pkg.pickupAddress}</Text>
+              <Text style={styles.stationAddress}>
+                {pkg.pickupAddress.replace(
+                  /(?:兔喜(?:生活|快递|超市)?|菜鸟(?:驿站|裹裹)?|丰巢(?:快递柜|智能柜)?|妈妈驿站|韵达超市|快递超市|邻里驿站|自提柜|代收点|快递柜|驿站)$/g,
+                  '',
+                ).trim()}
+              </Text>
             </View>
           ) : null}
 
-          <Pressable
-            style={styles.navButton}
-            onPress={() => navigateToAddress(
-              pkg.pickupAddress || pkg.pickupPointName || '',
-              pkg.pickupPointName,
-            )}
-          >
-            <Text style={styles.navButtonText}>🧭 导航至此</Text>
-          </Pressable>
         </View>
       ) : null}
 
@@ -305,7 +391,7 @@ export default function DetailScreen() {
       {/* 快捷操作栏 */}
       <View style={styles.quickActions}>
         <Pressable style={styles.quickBtn} onPress={handleTogglePin}>
-          <Text style={styles.quickBtnText}>{pkg.pinned ? '📌 取消置顶' : '📌 置顶'}</Text>
+          <Text style={styles.quickBtnText}>{pkg.pinned ? '📦 取消置顶' : '📦 置顶'}</Text>
         </Pressable>
         <Pressable style={styles.quickBtn} onPress={() => { getMembers().then(setMembers); setShowAssign(true); }}>
           <Text style={styles.quickBtnText}>👤 {pkg.assignedToName ? '改分配' : '分配给'}</Text>
@@ -450,6 +536,26 @@ const createStyles = (colors: ColorScheme, r: ResponsiveConstants) => StyleSheet
     overflow: 'hidden',
     minHeight: 44,
   },
+  // 时效倒计时条
+  timeLimitBar: {
+    marginHorizontal: r.scaledSpacing.lg,
+    marginBottom: r.scaledSpacing.md,
+    borderRadius: r.scaledBorderRadius.lg,
+    padding: r.scaledSpacing.md,
+    borderWidth: 1,
+  },
+  timeLimitHeader: {
+    flexDirection: 'row', alignItems: 'center',
+    marginBottom: r.scaledSpacing.sm,
+  },
+  timeLimitIcon: { fontSize: r.scaledFontSize.subhead, marginRight: r.scaledSpacing.xs },
+  timeLimitLabel: { fontSize: r.scaledFontSize.subhead, fontWeight: '600' },
+  timeLimitTrack: {
+    height: 6, borderRadius: 3,
+    backgroundColor: 'rgba(0,0,0,0.1)',
+    overflow: 'hidden',
+  },
+  timeLimitFill: { height: '100%', borderRadius: 3 },
   stationCard: {
     backgroundColor: colors.surface,
     marginHorizontal: r.scaledSpacing.lg,
@@ -498,23 +604,14 @@ const createStyles = (colors: ColorScheme, r: ResponsiveConstants) => StyleSheet
     paddingHorizontal: r.scaledSpacing.md,
     paddingVertical: scaleSize(4),
   },
+  businessHoursText: {
+    fontSize: r.scaledFontSize.footnote,
+    fontWeight: '500',
+    flexShrink: 1,
+  },
   callButtonText: {
     color: '#FFFFFF',
     fontSize: r.scaledFontSize.caption1,
-    fontWeight: '600',
-  },
-  navButton: {
-    backgroundColor: colors.primary,
-    borderRadius: r.scaledBorderRadius.md,
-    paddingVertical: r.scaledSpacing.md,
-    alignItems: 'center',
-    marginTop: r.scaledSpacing.md,
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  navButtonText: {
-    color: '#FFFFFF',
-    fontSize: r.scaledFontSize.body,
     fontWeight: '600',
   },
   editButton: {

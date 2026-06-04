@@ -2,6 +2,10 @@
 // 家庭共享服务 — 成员管理 + 包裹分配
 // ============================================================
 import type { FamilyMember } from '../models';
+import { getSetting, setSetting } from '../../modules/expo-notification-reader';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('FamilyService');
 
 const STORAGE_KEY = 'family_members';
 const FAMILY_COLORS = ['#FF6B35', '#34C759', '#007AFF', '#FF9500', '#AF52DE', '#FF2D55', '#FFCC00', '#00C7BE'];
@@ -12,11 +16,10 @@ let cached: FamilyMember[] | null = null;
 export async function getMembers(): Promise<FamilyMember[]> {
   if (cached) return cached;
   try {
-    const { getSetting } = require('../../modules/expo-notification-reader');
     const json = await getSetting(STORAGE_KEY);
     cached = json ? JSON.parse(json) : [];
     return cached!;
-  } catch { return []; }
+  } catch (e) { log.error('获取成员列表失败', { error: String(e) }); return []; }
 }
 
 /** 添加成员 */
@@ -43,9 +46,8 @@ export async function removeMember(id: string): Promise<void> {
 async function saveMembers(members: FamilyMember[]): Promise<void> {
   cached = members;
   try {
-    const { setSetting } = require('../../modules/expo-notification-reader');
     await setSetting(STORAGE_KEY, JSON.stringify(members));
-  } catch {}
+  } catch (e) { log.error('保存成员列表失败', { error: String(e) }); }
 }
 
 /** 根据ID找成员 */

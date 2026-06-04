@@ -65,6 +65,94 @@ export function getExpiryStatus(expiresAt: number): {
 }
 
 // ============================================================
+// 快递柜时效倒计时（丰巢等短时效包裹）
+// ============================================================
+
+/** 时效状态 */
+export interface TimeLimitStatus {
+  /** 剩余小时数（负数=已超时） */
+  hoursLeft: number;
+  /** 剩余分钟数（<1小时时显示） */
+  minutesLeft: number;
+  /** 是否已超时 */
+  expired: boolean;
+  /** 显示文案 */
+  label: string;
+  /** 颜色：green / orange / red / gray */
+  color: 'green' | 'orange' | 'red' | 'gray';
+  /** 进度条百分比（0-1） */
+  progress: number;
+}
+
+/**
+ * 计算快递柜取件码时效状态
+ * 用于丰巢、自提柜等短时效包裹
+ * 假设初始时效为24小时（如果没有 expiresAt 则返回 null）
+ */
+export function getTimeLimitStatus(expiresAt: number, defaultHours = 24): TimeLimitStatus | null {
+  if (!expiresAt || expiresAt <= 0) return null;
+
+  const now = Date.now();
+  const diffMs = expiresAt - now;
+  const totalMs = defaultHours * 60 * 60 * 1000;
+  const hoursLeft = diffMs / (60 * 60 * 1000);
+  const minutesLeft = diffMs / (60 * 1000);
+  const progress = Math.max(0, Math.min(1, 1 - diffMs / totalMs));
+
+  if (hoursLeft < 0) {
+    const over = Math.abs(hoursLeft);
+    const overLabel = over < 1
+      ? `${Math.round(over * 60)}分钟`
+      : `${over.toFixed(1)}小时`;
+    return {
+      hoursLeft,
+      minutesLeft,
+      expired: true,
+      label: `已超时${overLabel}`,
+      color: 'red',
+      progress: 1,
+    };
+  }
+
+  if (hoursLeft < 1) {
+    return {
+      hoursLeft,
+      minutesLeft,
+      expired: false,
+      label: `剩余${Math.round(minutesLeft)}分钟`,
+      color: 'red',
+      progress,
+    };
+  }
+
+  if (hoursLeft < 6) {
+    return {
+      hoursLeft,
+      minutesLeft,
+      expired: false,
+      label: `剩余${Math.floor(hoursLeft)}小时`,
+      color: 'orange',
+      progress,
+    };
+  }
+
+  return {
+    hoursLeft,
+    minutesLeft,
+    expired: false,
+    label: `剩余${Math.floor(hoursLeft)}小时`,
+    color: 'green',
+    progress,
+  };
+}
+
+/** 判断取件点是否为短时效快递柜 */
+export function isTimeSensitiveStation(name: string | null | undefined): boolean {
+  if (!name) return false;
+  return /丰巢|快递柜|自提柜|菜鸟柜|智能柜/.test(name);
+}
+
+// ============================================================
 // 地址有效性校验
 // ============================================================
 
@@ -108,6 +196,98 @@ export function isValidAddress(text: string): boolean {
   if (!ADDRESS_FEATURE_PATTERNS.some(p => p.test(text))) return false;
 
   return true;
+}
+
+/** 地址可导航所需的精确度特征（至少有楼号/小区/具体地标级别） */
+const NAVIGABLE_ADDRESS_PATTERNS: RegExp[] = [
+  // 有具体门牌号
+  /(?:\d+号[楼栋幢]|\d+[号栋幢]|\d+单元|\d+室|\d+层|号楼|号院)/,
+  // 有小区/大厦/园区等具体地标 + 楼号
+  /(?:小区|花园|园|苑|公寓|大厦|广场|社区|新村|校区).{0,10}(?:\d+[号栋幢楼]|\d+单元)/,
+  // 有道路 + 门牌号
+  /(?:路|街|道|巷|弄|大道|大街).{0,15}\d+[号弄]/,
+  // 驿站/快递柜等具体取件点 + 位置描述
+  /(?:驿站|快递柜|丰巢|菜鸟|兔喜|妈妈驿站|韵达超市|邻里驿站|自提柜|代收点|快递超市).{0,30}(?:\d+[号栋幢楼]|小区|花园|村)/,
+  // 有村庄 + 具体位置
+  /(?:村|镇|屯|庄).{0,20}(?:\d+[号栋幢组]|小区|花园|单元)/,
+];
+
+/** 地址仅为模糊区域的特征（无法精确导航） */
+const VAGUE_ADDRESS_PATTERNS: RegExp[] = [
+  // 只有城市/区/街道级别，无具体门牌
+  /^[一-龥]{2,10}(?:市|县|区|镇|乡|街道|路|街|道)$/,
+  // 只有路名没有门牌号
+  /^[一-龥\d]{2,20}(?:路|街|道|巷|弄|大道|大街)$/,
+  // "XX附近" / "XX对面" / "XX旁边" 等模糊描述
+  /(?:附近|对面|旁边|附近|一带|左右|周边)$/,
+];
+
+/**
+ * 校验地址是否足够精确以用于导航
+ * 返回 true 表示地址含具体门牌/楼号/小区，可导航
+ * 返回 false 表示地址过于模糊，无法精确定位
+ */
+export function isAddressNavigable(address: string | null | undefined): boolean {
+  if (!address || address.length < 6) return false;
+
+  // 基础校验
+  if (!isValidAddress(address)) return false;
+
+  // 拒绝模糊地址
+  if (VAGUE_ADDRESS_PATTERNS.some(p => p.test(address))) return false;
+
+  // 必须有可导航的精确特征
+  return NAVIGABLE_ADDRESS_PATTERNS.some(p => p.test(address));
+}
+
+/**
+ * 地址质量评分（0-100）
+ * - 90+: 完整地址，含门牌号/楼号/单元/室，可直接导航
+ * - 70-89: 含小区/道路 + 大致位置，导航可达附近
+ * - 50-69: 仅有道路名/小区名，需补充
+ * - 30-49: 仅有区域/街道名，不可导航
+ * - 0-29: 疑似非地址或极度模糊
+ */
+export function scoreAddressQuality(address: string | null | undefined): number {
+  if (!address || address.length < 4) return 0;
+
+  let score = 0;
+
+  // 基础：中文 + 地址特征
+  if (!/[一-龥]/.test(address)) return 0;
+  if (!ADDRESS_FEATURE_PATTERNS.some(p => p.test(address))) return 0;
+
+  score += 20; // 基础分
+
+  // 长度奖励
+  if (address.length >= 10) score += 5;
+  if (address.length >= 15) score += 5;
+
+  // 省/市/区/县/镇级地名
+  if (/(?:省|市|区|县|镇|乡|街道)/.test(address)) score += 10;
+
+  // 道路级别
+  if (/(?:路|街|道|巷|弄|大道|大街)/.test(address)) score += 10;
+
+  // 小区/社区级别
+  if (/(?:小区|社区|新村|花园|公寓|园区|苑|坊)/.test(address)) score += 10;
+
+  // 楼号/栋号
+  if (/\d+[号栋幢楼]/.test(address)) score += 15;
+
+  // 单元/室/层
+  if (/(?:\d+单元|\d+室|\d+层|号楼)/.test(address)) score += 15;
+
+  // 具体地标
+  if (/(?:驿站|快递柜|丰巢|菜鸟|兔喜|妈妈驿站|超市|商场|大厦|广场|学校|医院|银行)/.test(address)) score += 10;
+
+  // 减分项：模糊描述
+  if (/(?:附近|对面|旁边|一带|左右|周边|不远处)/.test(address)) score -= 20;
+
+  // 减分项：可能是快递公司名或单号
+  if (NON_ADDRESS_PATTERNS.some(p => p.test(address))) score -= 50;
+
+  return Math.max(0, Math.min(100, score));
 }
 
 // ============================================================

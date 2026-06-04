@@ -326,7 +326,7 @@ export const CourierIcons: Record<string, string> = {
 // 取件点图标 — 根据名称关键词匹配
 /** 取件点标识（贴近品牌实际logo） */
 export function getPickupPointIcon(name: string): string {
-  if (!name) return '📍';
+  if (!name) return '📦';
   if (name.includes('兔喜')) return '🐰';
   if (name.includes('菜鸟')) return '🐦';
   if (name.includes('丰巢') || name.includes('蜂巢')) return '🐝';
@@ -352,9 +352,9 @@ export function getPickupPointIcon(name: string): string {
   if (name.includes('快递超市')) return '📦';
   if (name.includes('韵达超市')) return '🟡';
   if (name.includes('自提柜')) return '🗄️';
-  if (name.includes('代收点')) return '📍';
+  if (name.includes('代收点')) return '📦';
   if (name.includes('驿站')) return '🏠';
-  return '📍';
+  return '📦';
 }
 
 /** 取件点品牌色（用于分组背景） */

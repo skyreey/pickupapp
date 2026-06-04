@@ -42,7 +42,8 @@ export const SHOPPING_APPS: Record<string, ShoppingApp> = {
   'com.xingin.xhs':           { packageName: 'com.xingin.xhs',           name: '小红书', icon: '📕', color: '#FE2C55' },
   'com.kuaishou.nebula':      { packageName: 'com.kuaishou.nebula',      name: '快手',   icon: '🟡', color: '#FF4906' },
   'com.vipshop':              { packageName: 'com.vipshop',              name: '唯品会', icon: '🛍️', color: '#F1010A' },
-  'com.suning.mobile.ebuy':   { packageName: 'com.suning.mobile.ebuy',   name: '苏宁',   icon: '🔵', color: '#FF6600' },
+  'com.suning.mobile.ebuy':   { packageName: 'com.suning.mobile.ebuy',   name: '苏宁',   icon: '🔲', color: '#FF6600' },
+  'com.tencent.mm':          { packageName: 'com.tencent.mm',          name: '微信',   icon: '💬', color: '#07C160' },
 };
 
 // ============================================================
@@ -330,3 +331,16 @@ export function extractPaymentAmount(packageName: string, text: string): number 
   if (/红包|退款|提现|免密|代扣|自动扣/.test(text)) return null;
   return amount;
 }
+
+// ============================================================
+// 代取分享消息检测
+// ============================================================
+export const PROXY_PICKUP_MARKER = '📦 取件通代取';
+export const PROXY_PICKUP_PATTERNS = {
+  sender: /来自[：:]\s*(.+)/,
+  code: /取件码[：:]\s*(S+)/,
+  carrier: /快递[：:]\s*(.+)/,
+  address: /地址[：:]\s*(.+)/,
+  phone: /电话[：:]\s*(S+)/,
+  deadline: /截止[：:]\s*(.+)/,
+};

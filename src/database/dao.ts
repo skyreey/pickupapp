@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // 数据访问层 —— 包裹和物流轨迹的 CRUD
 // ============================================================
 import { getDatabase } from './index';
@@ -64,8 +64,7 @@ export function getAllPackages(status?: PackageStatus | 'all' | 'active' | 'expi
   }
 
   // 排序：置顶优先 → 用户选择排序
-    // Safe: orderBy values come from PackageSort literal union via switch, no injection risk
-const orderBy = (() => {
+  const orderBy = (() => {
     switch (sort) {
       case 'time-asc': return 'ORDER BY pinned DESC, created_at ASC';
       case 'station': return 'ORDER BY pinned DESC, pickup_point_name ASC, created_at DESC';
@@ -148,6 +147,53 @@ function deduplicateByPickupCode(code: string): void {
   }
 }
 
+/** 检测并删除同一快递单号的重复包裹，保留信息最完整的那条 */
+function deduplicateByTrackingNumber(tn: string): void {
+  const db = getDatabase();
+  const rows = db.getAllSync<Record<string, unknown>>(
+    `SELECT * FROM packages
+     WHERE tracking_number = ?
+     ORDER BY created_at ASC`,
+    [tn],
+  );
+  if (rows.length < 2) return;
+
+  let best = rows[0];
+  let bestScore = -1;
+  for (const row of rows) {
+    let score = 0;
+    if (row.pickup_code) score += 3;
+    if (row.pickup_address) score += 1;
+    if (row.carrier_name && !['unknown', '其他', '快递'].includes(row.carrier_name as string)) score += 1;
+    if (row.product_name) score += 1;
+    if (row.order_source) score += 1;
+    if (row.pickup_point_name) score += 1;
+    if (row.pickup_point_phone) score += 1;
+    if (row.current_status === 'stored') score += 2;
+    if (score > bestScore) { bestScore = score; best = row; }
+  }
+
+  for (const row of rows) {
+    if (row.id === best.id) continue;
+    db.runSync('DELETE FROM tracking_events WHERE package_id = ?', [row.id as string]);
+    db.runSync('DELETE FROM packages WHERE id = ?', [row.id as string]);
+  }
+}
+
+/** 全局去重：扫描所有快递单号，删除多余重复包裹 */
+export function deduplicateAllTrackingNumbers(): void {
+  const db = getDatabase();
+  const rows = db.getAllSync<Record<string, unknown>>(
+    `SELECT tracking_number FROM packages
+     WHERE tracking_number IS NOT NULL AND tracking_number != ''
+     GROUP BY tracking_number
+     HAVING COUNT(*) > 1`
+  );
+  for (const row of rows) {
+    deduplicateByTrackingNumber(row.tracking_number as string);
+  }
+}
+
 /** 全局去重：扫描所有取件码，删除多余重复包裹 */
 export function deduplicateAllPickupCodes(): void {
   const db = getDatabase();
@@ -214,6 +260,30 @@ export function findMatchingPackage(
     [carrier, cutoff],
   );
   return row ? rowToPackage(row) : null;
+}
+
+/** 按快递单号尾号匹配（短信中只有尾号时用于关联已有包裹） */
+export function findPackageByTailNumber(tailNumber: string, carrier?: string): Package | null {
+  const db = getDatabase();
+  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  // 优先匹配同快递公司 + tracking_number 以尾号结尾的
+  if (carrier && carrier !== 'unknown') {
+    const row = db.getFirstSync<Record<string, unknown>>(
+      `SELECT * FROM packages
+       WHERE tracking_number LIKE ? AND carrier = ? AND created_at > ?
+       ORDER BY created_at DESC LIMIT 1`,
+      [`%${tailNumber}`, carrier, cutoff],
+    );
+    if (row) return rowToPackage(row);
+  }
+  // 兜底：不限制快递公司
+  const row2 = db.getFirstSync<Record<string, unknown>>(
+    `SELECT * FROM packages
+     WHERE tracking_number LIKE ? AND created_at > ?
+     ORDER BY created_at DESC LIMIT 1`,
+    [`%${tailNumber}`, cutoff],
+  );
+  return row2 ? rowToPackage(row2) : null;
 }
 
 /** 更新包裹状态 */

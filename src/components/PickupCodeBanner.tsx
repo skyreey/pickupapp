@@ -29,7 +29,13 @@ export function PickupCodeBanner({ code, companyName }: Props) {
   const parts = code.split(/[-—\s]/);
 
   return (
-    <Pressable onPress={handleCopy} style={styles.container}>
+    <Pressable
+      onPress={handleCopy}
+      style={styles.container}
+      accessibilityLabel={`取件码 ${code}，${companyName ? companyName + '，' : ''}双击复制到剪贴板`}
+      accessibilityRole="button"
+      accessibilityHint="双击复制取件码"
+    >
       <View style={styles.banner}>
         <Text style={styles.headerText}>取件码</Text>
         {companyName ? (
