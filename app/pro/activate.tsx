@@ -18,12 +18,14 @@ import {
 } from '../../src/services/settings-store';
 import { startPaymentMonitor, stopPaymentMonitor } from '../../src/services/payment-monitor';
 import { verifyActivationCode, getRemainingAttempts } from '../../src/services/pro-activation';
+import { clearHealthCache } from '../../src/services/remote-activation';
 import { VipBadge } from '../../src/components/VipBadge';
 import { ErrorBoundary } from '../../src/components/ErrorBoundary';
 
 // 收款账户
 const ALIPAY_ACCOUNT = '18352111943';
 const WECHAT_ACCOUNT = '18352111943';
+const CUSTOMER_WECHAT = 'skyreey';
 
 const TIERS: Array<{
   key: MembershipTier; name: string; price: string; amount: number;
@@ -205,9 +207,10 @@ export default function ActivateScreen() {
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.waitingTitle}>等待支付到账...</Text>
           <Text style={styles.waitingDesc}>
-            请在微信或支付宝完成支付{'\n'}
+            请在支付App完成转账{'\n'}
             支付金额：{TIERS.find(t => t.key === selectedTier)?.price}{'\n\n'}
-            支付成功后自动激活，无需手动操作
+            支付完成后，截图发送给客服微信{'\n'}
+            {CUSTOMER_WECHAT}，即可获得激活码
           </Text>
           <Pressable style={[gStyles.button, { marginTop: Spacing.lg, width: '100%', backgroundColor: colors.secondarySurface }]} onPress={handleCancel}>
             <Text style={[gStyles.buttonText, { color: colors.textSecondary }]}>取消</Text>
@@ -262,9 +265,9 @@ export default function ActivateScreen() {
               </Text>
               <Text style={styles.codeHint}>
                 激活码可通过以下方式获取：{'\n'}
-                • 联系客服购买（微信号：skyreey）{'\n'}
-                • 参与内测活动免费领取{'\n'}
-                • 激活码格式：PICKUP-等级前缀-12位码
+{`· 联系客服购买（微信：${CUSTOMER_WECHAT}）{'\n'}`}
+                · 参与内测活动免费领取{'\n'}
+                · 支付后截图发送客服获取
               </Text>
             </View>
           ) : (
@@ -314,7 +317,7 @@ export default function ActivateScreen() {
               </Pressable>
 
               <Text style={styles.hint}>
-                点击上方按钮跳转支付 → 完成转账后{'\n'}系统自动检测付款 → 即时激活 Pro
+                转账后截图发送客服微信 {CUSTOMER_WECHAT}{'\n'}客服发送激活码 → 在App输入激活码完成开通
               </Text>
             </>
           )}

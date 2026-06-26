@@ -1,12 +1,16 @@
 // ============================================================
-// 取件通 Pro · 激活码签发验证 + 会员云端绑定 v2
+// 取件通 Pro · 激活码签发验证 + 会员云端绑定 v3
 //
-// 新增（相对 v1）：
-//   1. memberships 表 — 会员云端绑定（deviceId + phone）
-//   2. POST /api/sync-membership — 客户端同步会员状态到云端
-//   3. POST /api/restore-membership — 换手机时恢复会员
-//   4. GET /api/membership/:deviceId — 查询云端会员状态
-//   5. SQLite 文件持久化（不再用 :memory:）
+// v3 新增（相对 v2）：
+//   1. code_pool 表 — 激活码池（available/assigned/used/revoked）
+//   2. POST /api/admin/generate — 增强：生成的码写入码池
+//   3. POST /api/admin/list-codes — 查询码池状态
+//   4. POST /api/admin/revoke-code — 撤销激活码
+//   5. POST /api/verify — 增强：验证时同步更新码池状态
+//
+// 保留（v2）：
+//   used_codes 防重放 / memberships 云端绑定 / JWT 签发
+//   sync-membership / restore-membership / validate-token
 // ============================================================
 
 const express = require('express');
@@ -72,6 +76,22 @@ db.exec(`
     PRIMARY KEY (device_id)
   );
   CREATE INDEX IF NOT EXISTS idx_memberships_phone ON memberships(phone_hash);
+
+  CREATE TABLE IF NOT EXISTS code_pool (
+    code_hash TEXT PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    tier TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'available',
+    generated_at INTEGER NOT NULL,
+    assigned_to TEXT,
+    assigned_at INTEGER,
+    used_by_device TEXT,
+    used_at INTEGER,
+    revoked_at INTEGER,
+    notes TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_code_pool_status ON code_pool(status);
+  CREATE INDEX IF NOT EXISTS idx_code_pool_tier ON code_pool(tier);
 `);
 
 // ===== 限速 =====
@@ -130,6 +150,12 @@ app.post('/api/verify', verifyLimiter, (req, res) => {
       return res.json({ valid: false, reason: 'ALREADY_USED', message: '该激活码已被使用' });
     }
 
+    // 检查码池：是否存在且可用
+    const poolEntry = db.prepare('SELECT * FROM code_pool WHERE code_hash = ?').get(codeHash);
+    if (poolEntry && (poolEntry.status === 'used' || poolEntry.status === 'revoked')) {
+      return res.json({ valid: false, reason: 'ALREADY_USED', message: '该激活码已被使用或撤销' });
+    }
+
     // 格式
     const match = trimmed.match(/^PICKUP-(PM|PY|PF)-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
     if (!match) return res.json({ valid: false, reason: 'INVALID_FORMAT' });
@@ -149,6 +175,12 @@ app.post('/api/verify', verifyLimiter, (req, res) => {
     if (deviceId) {
       db.prepare(`INSERT OR REPLACE INTO memberships (device_id, phone_hash, tier, activated_at, expires_at, token, synced_at) VALUES (?,?,?,?,?,?,?)`)
         .run(deviceId, hashPhone(phone), tier, now(), expiresAt, token, now());
+    }
+
+    // 更新码池状态
+    if (poolEntry) {
+      db.prepare('UPDATE code_pool SET status = ?, used_by_device = ?, used_at = ? WHERE code_hash = ?')
+        .run('used', deviceId || null, now(), codeHash);
     }
 
     return res.json({
@@ -275,14 +307,57 @@ app.post('/api/validate-token', validateTokenLimiter, (req, res) => {
 /** GET /api/public-key */
 app.get('/api/public-key', (req, res) => res.json({ publicKey: PUBLIC_KEY }));
 
-/** POST /api/admin/generate (管理端) */
+/** POST /api/admin/generate (管理端) — v3: 生成并写入码池 */
 app.post('/api/admin/generate', (req, res) => {
   if (req.headers.authorization !== `Bearer ${ADMIN_TOKEN}`) return res.status(401).json({ error: '未授权' });
-  const { tier, count = 1 } = req.body;
+  const { tier, count = 1, notes = '' } = req.body;
   if (!['monthly', 'yearly', 'lifetime'].includes(tier)) return res.status(400).json({ error: '无效等级' });
   const codes = [];
-  for (let i = 0; i < Math.min(count, 100); i++) codes.push(generateCode(tier));
-  return res.json({ tier, count: codes.length, codes });
+  const stmt = db.prepare('INSERT INTO code_pool (code_hash, code, tier, status, generated_at, notes) VALUES (?,?,?,?,?,?)');
+  for (let i = 0; i < Math.min(count, 100); i++) {
+    const code = generateCode(tier);
+    codes.push(code);
+    stmt.run(hashCode(code), code, tier, 'available', now(), notes);
+  }
+  return res.json({ tier, count: codes.length, codes, stored_in_pool: true });
+});
+
+/** POST /api/admin/list-codes — 查询码池 */
+app.post('/api/admin/list-codes', (req, res) => {
+  if (req.headers.authorization !== `Bearer ${ADMIN_TOKEN}`) return res.status(401).json({ error: '未授权' });
+  const { status, tier, limit = 50, offset = 0 } = req.body;
+  let sql = 'SELECT * FROM code_pool WHERE 1=1';
+  const params = [];
+  if (status) { sql += ' AND status = ?'; params.push(status); }
+  if (tier) { sql += ' AND tier = ?'; params.push(tier); }
+  sql += ' ORDER BY generated_at DESC LIMIT ? OFFSET ?';
+  params.push(Math.min(limit, 200), offset || 0);
+  const rows = db.prepare(sql).all(...params);
+  // 返回时不包含原始激活码（安全考虑）
+  const safe = rows.map(r => ({
+    code_prefix: r.code.slice(0, 16) + '...',
+    tier: r.tier,
+    status: r.status,
+    generated_at: r.generated_at * 1000,
+    assigned_to: r.assigned_to,
+    used_at: r.used_at ? r.used_at * 1000 : null,
+    notes: r.notes,
+  }));
+  return res.json({ total: safe.length, rows: safe });
+});
+
+/** POST /api/admin/revoke-code — 撤销激活码 */
+app.post('/api/admin/revoke-code', (req, res) => {
+  if (req.headers.authorization !== `Bearer ${ADMIN_TOKEN}`) return res.status(401).json({ error: '未授权' });
+  const { code } = req.body;
+  if (!code) return res.status(400).json({ error: '缺少激活码' });
+  const codeHash = hashCode(code.trim().toUpperCase());
+  const existing = db.prepare('SELECT * FROM code_pool WHERE code_hash = ?').get(codeHash);
+  if (!existing) return res.json({ ok: false, reason: 'NOT_FOUND', message: '码池中无此激活码' });
+  if (existing.status === 'revoked') return res.json({ ok: false, reason: 'ALREADY_REVOKED', message: '该码已被撤销' });
+  db.prepare('UPDATE code_pool SET status = ?, revoked_at = ? WHERE code_hash = ?')
+    .run('revoked', now(), codeHash);
+  return res.json({ ok: true, previous_status: existing.status });
 });
 
 /** GET /api/admin/stats */
@@ -292,10 +367,12 @@ app.get('/api/admin/stats', (req, res) => {
     .reduce((a, r) => ({ ...a, [r.tier]: r.cnt }), {});
   const total = db.prepare('SELECT COUNT(*) as cnt FROM memberships').get().cnt;
   const used = db.prepare('SELECT COUNT(*) as cnt FROM used_codes').get().cnt;
-  return res.json({ activeMembers: total, byTier, totalCodesUsed: used });
+  const poolStatus = db.prepare('SELECT status, COUNT(*) as cnt FROM code_pool GROUP BY status').all()
+    .reduce((a, r) => ({ ...a, [r.status]: r.cnt }), {});
+  return res.json({ activeMembers: total, byTier, totalCodesUsed: used, codePool: poolStatus });
 });
 
 // ===== 启动 =====
 app.listen(PORT, () => {
-  console.log(`[取件通Pro v2] 服务已启动，端口: ${PORT}`);
+  console.log(`[取件通Pro v3] 服务已启动，端口: ${PORT}`);
 });

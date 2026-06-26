@@ -1,10 +1,15 @@
 // ============================================================
-// 远程激活码验证 + 会员云端同步 v2
+// 远程激活码验证 + 会员云端同步 v3
 //
-// 新增（相对 v1）：
-//   1. syncMembership() — 激活后将会员状态同步到云端
-//   2. restoreMembership() — 换手机/清数据后恢复会员
-//   3. checkCloudMembership() — 启动时检查云端会员状态
+// v3 改进（相对 v2）：
+//   1. isServerAvailable() — 带缓存的健康检查
+//   2. remoteVerifyActivationCode() 统一返回类型
+//   3. 错误码细化
+//   4. 超时控制 8 秒（移动网络下合理）
+//
+// 保留（v2）：
+//   syncMembership() / restoreMembership() / checkCloudMembership()
+//   getDeviceId() / getStoredToken() / clearLocalToken()
 // ============================================================
 import { getSetting, setSetting } from '../../modules/expo-notification-reader';
 import { createLogger } from '../utils/logger';
@@ -25,30 +30,76 @@ export async function getDeviceId(): Promise<string> {
     const stored = await getSetting(DEVICE_ID_KEY);
     if (stored && stored.length > 8) { cachedDeviceId = stored; return cachedDeviceId; }
   } catch {}
-  // 生成新设备ID
   const id = `dvc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   cachedDeviceId = id;
   await setSetting(DEVICE_ID_KEY, id).catch(() => {});
   return id;
 }
 
+// ===== 服务端可达性检查 =====
+let lastHealthCheck: { time: number; available: boolean } | null = null;
+const HEALTH_CACHE_MS = 30_000;
+const FETCH_TIMEOUT_MS = 8_000;
+
+/**
+ * 检查服务端是否可达（30 秒缓存）
+ * 激活码验证前调用，决定走远程还是离线降级
+ */
+export async function isServerAvailable(): Promise<boolean> {
+  const now = Date.now();
+  if (lastHealthCheck && now - lastHealthCheck.time < HEALTH_CACHE_MS) {
+    return lastHealthCheck.available;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    const res = await fetch(`${API_BASE}/api/public-key`, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    lastHealthCheck = { time: now, available: res.ok };
+    return res.ok;
+  } catch {
+    lastHealthCheck = { time: now, available: false };
+    return false;
+  }
+}
+
+/** 清除健康检查缓存 */
+export function clearHealthCache(): void {
+  lastHealthCheck = null;
+}
+
 // ===== 远程验证激活码 =====
+export interface RemoteVerifyResult {
+  valid: boolean;
+  tier?: MembershipTier;
+  token?: string;
+  activatedAt?: number;
+  expiresAt?: number;
+  reason?: string;
+}
+
 export async function remoteVerifyActivationCode(
   code: string,
   phone?: string,
-): Promise<{
-  valid: boolean; tier?: string; token?: string;
-  activatedAt?: number; expiresAt?: number; reason?: string;
-}> {
+): Promise<RemoteVerifyResult> {
   try {
     const deviceId = await getDeviceId();
     log.info('远程验证激活码');
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
     const res = await fetch(`${API_BASE}/api/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code: code.trim().toUpperCase(), deviceId, phone: phone || null }),
+      signal: controller.signal,
     });
+    clearTimeout(timer);
 
     if (!res.ok) return { valid: false, reason: 'SERVER_ERROR' };
     const data = await res.json();
@@ -56,10 +107,24 @@ export async function remoteVerifyActivationCode(
     if (data.valid && data.token) {
       await setSetting(TOKEN_KEY, data.token).catch(() => {});
       log.info('远程验证成功', { tier: data.tier });
+      return {
+        valid: true,
+        tier: data.tier as MembershipTier,
+        token: data.token,
+        activatedAt: data.activatedAt,
+        expiresAt: data.expiresAt || 0,
+      };
     }
 
-    return data;
-  } catch (e) {
+    return {
+      valid: false,
+      reason: data.reason || 'INVALID_CODE',
+    };
+  } catch (e: any) {
+    if (e?.name === 'AbortError') {
+      log.warn('远程验证超时');
+      return { valid: false, reason: 'TIMEOUT' };
+    }
     log.warn('远程验证网络异常', { error: String(e) });
     return { valid: false, reason: 'NETWORK_ERROR' };
   }
@@ -99,14 +164,16 @@ export async function syncMembership(
 }
 
 // ===== 云端恢复会员 =====
-export async function restoreMembership(phone?: string): Promise<{
+export interface RestoreResult {
   found: boolean;
   tier?: MembershipTier;
   token?: string;
   activatedAt?: number;
   expiresAt?: number;
   reason?: string;
-}> {
+}
+
+export async function restoreMembership(phone?: string): Promise<RestoreResult> {
   try {
     const deviceId = await getDeviceId();
     log.info('尝试云端恢复会员');
@@ -121,7 +188,6 @@ export async function restoreMembership(phone?: string): Promise<{
     const data = await res.json();
 
     if (data.found) {
-      // 恢复成功：保存 JWT + 触发本地激活
       await setSetting(TOKEN_KEY, data.token).catch(() => {});
       log.info('云端恢复成功', { tier: data.tier });
       return {
@@ -154,12 +220,11 @@ export async function checkCloudMembership(): Promise<{
   }
 }
 
-// ===== 获取保存的 JWT =====
+// ===== 获取/清除本地凭证 =====
 export async function getStoredToken(): Promise<string | null> {
   try { return await getSetting(TOKEN_KEY); } catch { return null; }
 }
 
-// ===== 清除本地凭证 =====
 export async function clearLocalToken(): Promise<void> {
   await setSetting(TOKEN_KEY, '').catch(() => {});
   log.info('本地凭证已清除');
