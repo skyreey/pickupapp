@@ -17,7 +17,20 @@ import type { MembershipTier } from '../models';
 
 const log = createLogger('RemoteActivation');
 
-const API_BASE = 'https://api.pickupapp.example.com';
+// ============================================================
+// API 地址配置
+//
+// 发布前必须替换为真实服务端地址。可通过环境变量 EXPO_PUBLIC_API_BASE
+// 覆盖（EAS build 会自动注入），或直接修改下方默认值。
+// 如果仍为占位域名，远程验证将始终失败，激活退化为本地哈希验证。
+// ============================================================
+const API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'https://api.pickupapp.example.com';
+export const IS_API_CONFIGURED = !API_BASE.includes('example.com');
+
+if (!IS_API_CONFIGURED) {
+  log.warn('API_BASE 仍为占位域名，远程验证不可用，将退化为本地离线验证');
+}
+
 const TOKEN_KEY = 'ac_jwt_token';
 const DEVICE_ID_KEY = 'ac_device_id';
 

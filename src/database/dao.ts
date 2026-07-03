@@ -140,11 +140,13 @@ function deduplicateByPickupCode(code: string): void {
     if (score > bestScore) { bestScore = score; best = row; }
   }
 
-  for (const row of rows) {
-    if (row.id === best.id) continue;
-    db.runSync('DELETE FROM tracking_events WHERE package_id = ?', [row.id as string]);
-    db.runSync('DELETE FROM packages WHERE id = ?', [row.id as string]);
-  }
+  db.withTransactionSync(() => {
+    for (const row of rows) {
+      if (row.id === best.id) continue;
+      db.runSync('DELETE FROM tracking_events WHERE package_id = ?', [row.id as string]);
+      db.runSync('DELETE FROM packages WHERE id = ?', [row.id as string]);
+    }
+  });
 }
 
 /** 检测并删除同一快递单号的重复包裹，保留信息最完整的那条 */
@@ -173,11 +175,13 @@ function deduplicateByTrackingNumber(tn: string): void {
     if (score > bestScore) { bestScore = score; best = row; }
   }
 
-  for (const row of rows) {
-    if (row.id === best.id) continue;
-    db.runSync('DELETE FROM tracking_events WHERE package_id = ?', [row.id as string]);
-    db.runSync('DELETE FROM packages WHERE id = ?', [row.id as string]);
-  }
+  db.withTransactionSync(() => {
+    for (const row of rows) {
+      if (row.id === best.id) continue;
+      db.runSync('DELETE FROM tracking_events WHERE package_id = ?', [row.id as string]);
+      db.runSync('DELETE FROM packages WHERE id = ?', [row.id as string]);
+    }
+  });
 }
 
 /** 全局去重：扫描所有快递单号，删除多余重复包裹 */
@@ -353,17 +357,19 @@ export function batchDeletePackages(ids: string[]): void {
   if (ids.length === 0) return;
   const db = getDatabase();
   const placeholders = ids.map(() => '?').join(',');
-  db.runSync(`DELETE FROM tracking_events WHERE package_id IN (${placeholders})`, [...ids]);
-  db.runSync(`DELETE FROM packages WHERE id IN (${placeholders})`, [...ids]);
+  db.withTransactionSync(() => {
+    db.runSync(`DELETE FROM tracking_events WHERE package_id IN (${placeholders})`, [...ids]);
+    db.runSync(`DELETE FROM packages WHERE id IN (${placeholders})`, [...ids]);
+  });
 }
 
 /** 删除包裹 */
 export function deletePackage(id: string): void {
   const db = getDatabase();
-  // 先删轨迹
-  db.runSync('DELETE FROM tracking_events WHERE package_id = ?', [id]);
-  // 再删包裹
-  db.runSync('DELETE FROM packages WHERE id = ?', [id]);
+  db.withTransactionSync(() => {
+    db.runSync('DELETE FROM tracking_events WHERE package_id = ?', [id]);
+    db.runSync('DELETE FROM packages WHERE id = ?', [id]);
+  });
 }
 
 /** 分配包裹给家庭成员 */
@@ -387,8 +393,10 @@ export function togglePin(id: string): void {
 /** 清空所有包裹和轨迹 */
 export function deleteAllPackages(): void {
   const db = getDatabase();
-  db.runSync('DELETE FROM tracking_events');
-  db.runSync('DELETE FROM packages');
+  db.withTransactionSync(() => {
+    db.runSync('DELETE FROM tracking_events');
+    db.runSync('DELETE FROM packages');
+  });
 }
 
 /** 统计各状态数量 */
@@ -456,14 +464,16 @@ export function getPickupStats(): {
 /** 批量替换物流轨迹（先删旧数据，再插入新数据） */
 export function replaceTrackingEvents(packageId: string, events: TrackingEvent[]): void {
   const db = getDatabase();
-  db.runSync('DELETE FROM tracking_events WHERE package_id = ?', [packageId]);
-  for (const e of events) {
-    db.runSync(
-      `INSERT INTO tracking_events (id, package_id, time, status, location, raw_description)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [e.id, e.packageId, e.time, e.status, e.location, e.rawDescription],
-    );
-  }
+  db.withTransactionSync(() => {
+    db.runSync('DELETE FROM tracking_events WHERE package_id = ?', [packageId]);
+    for (const e of events) {
+      db.runSync(
+        `INSERT INTO tracking_events (id, package_id, time, status, location, raw_description)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [e.id, e.packageId, e.time, e.status, e.location, e.rawDescription],
+      );
+    }
+  });
 }
 
 /** 获取包裹的物流轨迹 */

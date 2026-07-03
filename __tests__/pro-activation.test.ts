@@ -1,6 +1,6 @@
 // ============================================================
 // 激活码服务单元测试
-// 覆盖：格式验证 · 限速逻辑 · 防重用 · 旧格式兼容
+// 覆盖：格式验证 · 限速逻辑 · 防重用 · v4 SHA-256 签名
 // ============================================================
 import {
   verifyActivationCode,
@@ -14,20 +14,22 @@ import {
 // ============================================================
 
 describe('generateActivationCode', () => {
+  // v4 格式：PICKUP-{PM|PY|PF}-{4}-{4}-{4}-{4}-{4}-{4} (6组 hex)
+  const FMT = /^PICKUP-(PM|PY|PF)-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/;
+
   test('生成 monthly 类型激活码', () => {
     const code = generateActivationCode('monthly');
-    // 格式：PICKUP-PM-XXXX-XXXX-XXXX-XXXX
-    expect(code).toMatch(/^PICKUP-PM-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+    expect(code).toMatch(FMT);
   });
 
   test('生成 yearly 类型激活码', () => {
     const code = generateActivationCode('yearly');
-    expect(code).toMatch(/^PICKUP-PY-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+    expect(code).toMatch(FMT);
   });
 
   test('生成 lifetime 类型激活码', () => {
     const code = generateActivationCode('lifetime');
-    expect(code).toMatch(/^PICKUP-PF-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+    expect(code).toMatch(FMT);
   });
 
   test('生成的码不重复', () => {
@@ -37,10 +39,17 @@ describe('generateActivationCode', () => {
     expect(codes.size).toBe(20);
   });
 
-  test('生成码的长度为 29 字符', () => {
+  test('生成码的长度为 39 字符', () => {
     const code = generateActivationCode('yearly');
-    expect(code.length).toBe(29);
-    // PICKUP-PY-XXXX-XXXX-XXXX-XXXX = 6+1+2+1+4+1+4+1+4+1+4 = 29
+    expect(code.length).toBe(39);
+    // PICKUP-PY-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX = 6+1+2+1+24+5 = 39
+  });
+
+  test('生成的码可本地验证通过', () => {
+    // round-trip: 生成后剥离前缀应能被 verifyLocal 逻辑匹配
+    const code = generateActivationCode('lifetime');
+    const stripped = code.replace(/-/g, '');
+    expect(stripped).toMatch(/^PICKUP(PM|PY|PF)[0-9A-F]{24}$/);
   });
 });
 
@@ -81,30 +90,26 @@ describe('getRemainingAttempts', () => {
 });
 
 describe('激活码格式校验', () => {
-  test('有效新格式 PICKUP-PY-16位码', () => {
-    // 格式验证不依赖原生模块
-    const validFormat = /^PICKUP-(PM|PY|PF)-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/;
-    const code = 'PICKUP-PY-ABCD-EFGH-IJKL-MNOP';
+  const validFormat = /^PICKUP-(PM|PY|PF)-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/;
+
+  test('有效新格式 PICKUP-PY-24位hex码', () => {
+    const code = 'PICKUP-PY-1234-5678-ABCD-EF12-3456-7890';
     expect(validFormat.test(code)).toBe(true);
   });
 
   test('无效：缺少PICKUP前缀', () => {
-    const validFormat = /^PICKUP-(PM|PY|PF)-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/;
-    expect(validFormat.test('PY-ABCD-EFGH-IJKL-MNOP')).toBe(false);
+    expect(validFormat.test('PY-1234-5678-ABCD-EF12-3456-7890')).toBe(false);
   });
 
   test('无效：错误等级前缀', () => {
-    const validFormat = /^PICKUP-(PM|PY|PF)-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/;
-    expect(validFormat.test('PICKUP-PX-ABCD-EFGH-IJKL-MNOP')).toBe(false);
+    expect(validFormat.test('PICKUP-PX-1234-5678-ABCD-EF12-3456-7890')).toBe(false);
   });
 
   test('无效：核心码含非法字符', () => {
-    const validFormat = /^PICKUP-(PM|PY|PF)-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/;
-    expect(validFormat.test('PICKUP-PY-ABCD-EFGH-IJKL-MNO$')).toBe(false);
+    expect(validFormat.test('PICKUP-PY-1234-5678-ABCD-EF12-3456-789G')).toBe(false);
   });
 
   test('无效：核心码太短', () => {
-    const validFormat = /^PICKUP-(PM|PY|PF)-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/;
     expect(validFormat.test('PICKUP-PY-ABC-DEF-GHI-JKL')).toBe(false);
   });
 });

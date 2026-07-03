@@ -10,6 +10,7 @@
 import type { MembershipTier } from '../models';
 import { getSetting, setSetting } from '../../modules/expo-notification-reader';
 import { createLogger } from '../utils/logger';
+import { sha256Hex, randomHex } from '../utils/sha256';
 import {
   isServerAvailable,
   remoteVerifyActivationCode,
@@ -18,7 +19,9 @@ import {
 
 const log = createLogger('ProActivation');
 
-// ===== 密钥碎片（拆散存储，运行时组装） =====
+// ===== 离线签名密钥（拆散存储，运行时组装） =====
+// 注意：客户端密钥可被逆向提取，离线验证仅为降级方案。
+// 首次激活应尽量走远程验证；服务端不可达时才降级本地。
 const K1 = 'pick';
 const K2 = 'up-pro';
 const K3 = '-2026-v2';
@@ -46,9 +49,8 @@ async function getDeviceSalt(): Promise<string> {
     const raw = await getSetting(DEVICE_SALT_KEY);
     if (raw && raw.length >= 32) { deviceSalt = raw; return deviceSalt; }
   } catch {}
-  const chars = '0123456789abcdef';
-  let salt = '';
-  for (let i = 0; i < 32; i++) salt += chars[Math.floor(Math.random() * chars.length)];
+  // 使用密码学安全随机数生成设备盐（替代 Math.random）
+  const salt = randomHex(16).toLowerCase(); // 32 hex 字符
   deviceSalt = salt;
   await setSetting(DEVICE_SALT_KEY, salt).catch(() => {});
   return salt;
@@ -108,54 +110,14 @@ function constantTimeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-// ===== 本地 HASH 验证（离线降级用） =====
+// ===== 本地 HMAC-SHA256 验证（离线降级用） =====
+// v4: 用标准 SHA-256 替代自研 strongHash（32 位整数哈希不是密码学哈希）
+// 签名长度从 8 提升到 16 hex 字符（64 位），碰撞空间从 ~4.3e9 提升到 ~1.8e19
 const CORE_RAND_LEN = 8;
-const CORE_SIG_LEN = 8;
-
-function strongHash(input: string): string {
-  const baseRounds = 500;
-  const rounds = baseRounds + (input.length % 50) * 31;
-  let h0 = 0x6a09e667;
-  let h1 = 0xbb67ae85;
-  let h2 = 0x3c6ef372;
-  const encoder = new TextEncoder();
-  const bytes = encoder.encode(input);
-
-  for (let r = 0; r < rounds; r++) {
-    for (let i = 0; i < bytes.length; i++) {
-      const b = bytes[i];
-      const ri = r & 0xff;
-      h0 = ((h0 << 7) - h0 + b + ri + i) | 0;
-      h0 = ((h0 ^ (h0 >>> 16)) * 0x85ebca6b) | 0;
-      h0 = ((h0 ^ (h0 >>> 13)) * 0xc2b2ae35) | 0;
-      h0 = (h0 ^ (h0 >>> 16)) | 0;
-      h1 = ((h1 << 5) - h1 + b * 31 + ri * 7 + i * 3) | 0;
-      h1 = ((h1 ^ (h1 >>> 17)) * 0xed5ad4bb) | 0;
-      h1 = ((h1 ^ (h1 >>> 11)) * 0xac4c1b51) | 0;
-      h1 = (h1 ^ (h1 >>> 15)) | 0;
-      h2 = ((h2 << 9) - h2 + b * 17 + ri * 13 + i * 5) | 0;
-      h2 = ((h2 ^ (h2 >>> 19)) * 0xa5b1c7d3) | 0;
-      h2 = ((h2 ^ (h2 >>> 7)) * 0xe8173b2d) | 0;
-      h2 = (h2 ^ (h2 >>> 21)) | 0;
-    }
-    const mix = ((h0 & 0xffff) * (h1 & 0xffff) + (h2 & 0xffff)) | 0;
-    h0 = (h0 ^ mix) | 0;
-    h1 = (h1 ^ (mix >>> 1)) | 0;
-    h2 = (h2 ^ (mix >>> 2)) | 0;
-    if (bytes.length > 0) bytes[bytes.length - 1] = (bytes[bytes.length - 1] + (r & 0xff) + 1) & 0xff;
-  }
-
-  const hex = [
-    Math.abs(h0).toString(16).padStart(8, '0'),
-    Math.abs(h1).toString(16).padStart(8, '0'),
-    Math.abs(h2).toString(16).padStart(8, '0'),
-  ].join('');
-  const doubled = hex + hex;
-  return doubled + doubled.split('').reverse().join('');
-}
+const CORE_SIG_LEN = 16; // SHA-256 截断到 16 hex = 64 位签名
 
 function computeSignature(data: string): string {
-  return strongHash(data).slice(0, CORE_SIG_LEN).toUpperCase();
+  return sha256Hex(data).slice(0, CORE_SIG_LEN);
 }
 
 function verifyLocal(code: string, tier: MembershipTier, salt: string): boolean {
@@ -249,7 +211,8 @@ export async function verifyActivationCode(code: string): Promise<MembershipTier
   let tierKey: MembershipTier | null = null;
 
   const stripped = trimmed.replace(/-/g, '');
-  const newMatch = stripped.match(/^PICKUP(PM|PY|PF)([0-9A-Z]{16})$/);
+  // v4: core = 8 hex(随机) + 16 hex(SHA-256签名截断) = 24 hex 字符
+  const newMatch = stripped.match(/^PICKUP(PM|PY|PF)([0-9A-F]{24})$/);
   if (newMatch) {
     const prefix = newMatch[1];
     const entry = Object.entries(TIER_PREFIX).find(([, p]) => p === prefix);
@@ -296,17 +259,15 @@ export async function resetRateLimit(): Promise<void> {
 // ===== 管理端生码 =====
 
 function generateCore(tier: MembershipTier, salt: string): string {
-  const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  let randomPart = '';
-  for (let i = 0; i < CORE_RAND_LEN; i++) {
-    randomPart += chars[Math.floor(Math.random() * chars.length)];
-  }
+  // 密码学安全随机数（替代 Math.random）
+  const randomPart = randomHex(CORE_RAND_LEN / 2); // 8 hex 字符
   const sig = computeSignature(SECRET() + tier + salt + randomPart);
   return randomPart + sig;
 }
 
 function formatCode(core: string): string {
-  return `${core.slice(0, 4)}-${core.slice(4, 8)}-${core.slice(8, 12)}-${core.slice(12, 16)}`;
+  // core = 8(随机) + 16(签名) = 24 字符，按 4-4-4-4-4-4 分组
+  return `${core.slice(0, 4)}-${core.slice(4, 8)}-${core.slice(8, 12)}-${core.slice(12, 16)}-${core.slice(16, 20)}-${core.slice(20, 24)}`;
 }
 
 /**
